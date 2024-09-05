@@ -1,0 +1,59 @@
+#lang shplait
+
+// Calculates the sum of coins in cents
+fun sum_coins(pennies :: Int, nickels :: Int, dimes :: Int, quarters :: Int) :: Int:
+  pennies + nickels*5 + dimes*10 + quarters*25
+
+check:  sum_coins(10, 10, 10, 10) == 410
+        ~is #true
+        
+type Time
+| hms(hours :: Int, minutes :: Int, seconds :: Int)
+
+type Duration
+| elapsed(hours :: Int, minutes :: Int, seconds :: Int)
+
+// Adding a duration to the time, remember to wrap at 24 hours etc.
+fun time_add(t :: Time, d :: Duration) :: Time:
+  match t
+  | hms(hrs, min, sec):
+      match d
+      | elapsed(hours, minutes, seconds):
+          hms(hrs + hours, min + minutes, sec + seconds)
+
+// Pretty prints a time in a 12 hour format
+// Hint use +& for concatenating ints and strings.
+fun time_print(t :: Time):: String:
+  match t
+  | hms(hours, min, sec):
+      cond 
+      | hours == 0:
+          "12:"+&min+&":"+&sec+&" AM"
+      | hours < 12:
+          hours+&":"+&min+&":"+&sec+&" AM"
+      | hours == 12:
+          "12:"+&min+&":"+&sec+&" PM"
+      | ~else:
+          (hours-12)+&":"+&min+&":"+&sec+&" PM"
+
+check: time_print(hms(10, 2, 40))
+       ~is "10:2:40 AM"
+
+check: time_print(hms(12, 2, 40))
+       ~is "12:2:40 PM"
+       
+check: time_print(hms(0, 2, 40))
+       ~is "12:2:40 AM"
+
+
+
+fun list_length(l :: Listof(?a))::Int :
+  match l
+  | []: 0
+  | cons(a, rst): 1 + list_length(rst)
+
+check: list_length([1, 2, 3])
+       ~is 3
+
+check: list_length(cons(1, cons(2, cons(3, []))))
+       ~is 3
