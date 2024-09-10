@@ -1,0 +1,49 @@
+#lang shplait
+
+// return the altenating values of a list [1,2,3] -> [1,3] // [1,2,3,4] -> [1,3] // [1,2,3,4,5] -> [1,3,5]
+fun alternates(l :: Listof(Int)) :: Listof(Int):
+  ....
+
+check:  alternates([1, 2, 3])
+        ~is [1, 3]
+check:  alternates([1, 2, 3, 4])
+        ~is [1, 3]
+check:  alternates([1, 2, 3, 4, 5])
+        ~is [1, 3, 5]
+
+// Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
+// You may assume that each input would have exactly one solution, and you may not use the same element twice.
+// add_two
+// nums = [2,7,11,15], target = 9
+// Output: [0,1]
+fun add_two(two :: Listof(Int), target :: Int) :: Optionof(Listof(Int)):
+  ....
+
+check:  add_two([2, 7, 11, 15], 9)
+        ~is some([0, 1])
+check:  add_two([2, 7, 11, 15], 18)
+        ~is some([1, 2])
+check:  add_two([2, 7, 11, 15], 26)
+        ~is some([2, 3])
+
+// Find the index of the first element satisfying the predicate `p`, or none if not found
+fun find_pred(l :: Listof(?a), p :: ?a -> Boolean) :: Optionof(?a):
+  ....
+
+check:  find_pred([0, 1, 2], fun(x): x == 0)
+        ~is some(0)
+check:  find_pred(["a", "b", "c"], fun(x): x == "b")
+        ~is some("b")
+check:  find_pred([0, 1, 2], fun(x): x == 3)
+        ~is none()
+
+// Find the index of the first element satisfying the predicate `p`, or none if not found
+fun index_of_pred(l :: Listof(?a), p :: ?a -> Boolean) :: Optionof(?a) :
+  ....
+
+check:  index_of_pred([0, 1, 2], fun(x): x == 0)
+        ~is some(0)
+check:  index_of_pred([0, 1, -2], fun(x): x == -2)
+        ~is some(2)
+check:  index_of_pred(["a", "b", "c"], fun(x): x == "z")
+        ~is none()
