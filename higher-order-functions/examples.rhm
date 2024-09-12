@@ -1,8 +1,12 @@
 #lang shplait
 
-// Find the index of the first element satisfying the predicate `p`, or none if not found
+// Find the first element satisfying the predicate `p`, or none if not found
 fun find_pred(l :: Listof(?a), p :: ?a -> Boolean) :: Optionof(?a):
-  ....
+  match l 
+  | [] : none()
+  | cons(i, rst) : if p(i)
+                   | some(i)
+                   | find_pred(rst, p)
 
 check:  find_pred([0, 1, 2], fun(x): x == 0)
         ~is some(0)
@@ -12,25 +16,62 @@ check:  find_pred([0, 1, 2], fun(x): x == 3)
         ~is none()
 
 // Find the index of the first element satisfying the predicate `p`, or none if not found
-fun index_of_pred(l :: Listof(?a), p :: ?a -> Boolean) :: Optionof(?a):
-  ....
+fun index_of_pred(l :: Listof(?a), p :: ?a -> Boolean) :: Optionof(Int):
+  index_of_pred_indexed(l, p, 0)
 
-// check:  index_of_pred([0, 1, 2], fun(x): x == 0)
-//         ~is some(0)
-// check:  index_of_pred([0, 1, -2], fun(x): x == -2)
-//         ~is some(2)
-// check:  index_of_pred(["a", "b", "c"], fun(x): x == "z")
-//         ~is none()
+fun index_of_different(l :: Listof(?a),  p :: ?a -> Boolean) :: Optionof(Int):
+   match l
+   | []: none()
+   | cons(val, rst):
+       if p(val)
+       | some(0)
+       | match index_of_different(rst, p)
+         | none(): none()
+         | some(v): some(v + 1)
+
+fun index_of_pred_indexed(l :: Listof(?a), p :: ?a -> Boolean, index :: Int) :: Optionof(Int):
+   match l
+   | []: none()
+   | cons(val, rst):
+       if p(val) | some(index) | index_of_pred_indexed(rst, p, index + 1) 
+
+check:  index_of_pred([0, 1, 2], fun(x): x == 0)
+        ~is some(0)
+check:  index_of_pred([0, 1, -2], fun(x): x == -2)
+        ~is some(2)
+check:  index_of_pred(["a", "b", "c"], fun(x): x == "z")
+        ~is none()
 
 
 // Applies `f` to every element of `l`
 fun map(l :: Listof(?a), f :: (?a) -> ?b) :: Listof(?b):
-  ....
+  match l
+  | []: []
+  | cons(val, rst): cons(f(val), rst)
+
+fun filter(l :: Listof(?a), f:: (?a) -> Boolean) :: Listof(?a):
+  match l
+  | []: []
+  | cons(val, rst):
+      if f(val)
+      | cons(val, rst)
+      | rst
 
 // Applies `f` to every element of `l` paired with an accumulated value which starts at `init`.
 // Returns the accumulated value
-fun fold(l :: Listof(?a), init :: ?b, f:: (?a, ?b) -> ?b) :: ?b:
-  ....
+fun foldr(l :: Listof(?a), acc :: ?b, f:: (?a, ?b) -> ?b) :: ?b:
+  match l
+  | []: acc
+  | cons(val, rst): f(val, foldr(rst, acc , f))
+                    
+fun foldl(l :: Listof(?a), acc :: ?b, f:: (?a, ?b) -> ?b) :: ?b:
+  match l
+  | []: acc
+  | cons(val, rst):
+      foldl(rst, f(val, acc), f)
+
+check:  foldl([1, 2, 3], 0, fun(x, acc): x + acc)
+        ~is 6
 
 // Returns `#true` if `f` returns `#true` for every element of `l`, `#false` otherwise
 // !! Useful for homework
