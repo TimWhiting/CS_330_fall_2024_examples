@@ -59,16 +59,16 @@ fun filter(l :: Listof(?a), f:: (?a) -> Boolean) :: Listof(?a):
 
 // Applies `f` to every element of `l` paired with an accumulated value which starts at `init`.
 // Returns the accumulated value
-fun foldr(l :: Listof(?a), acc :: ?b, f:: (?a, ?b) -> ?b) :: ?b:
+fun foldr(l :: Listof(?a), acc :: ?b, combine:: (?a, ?b) -> ?b) :: ?b:
   match l
   | []: acc
-  | cons(val, rst): f(val, foldr(rst, acc , f))
+  | cons(val, rst): combine(val, foldr(rst, acc, combine))
                     
-fun foldl(l :: Listof(?a), acc :: ?b, f:: (?a, ?b) -> ?b) :: ?b:
+fun foldl(l :: Listof(?a), acc :: ?b, combine:: (?a, ?b) -> ?b) :: ?b:
   match l
   | []: acc
   | cons(val, rst):
-      foldl(rst, f(val, acc), f)
+      foldl(rst, combine(val, acc), combine)
 
 check:  foldl([1, 2, 3], 0, fun(x, acc): x + acc)
         ~is 6
