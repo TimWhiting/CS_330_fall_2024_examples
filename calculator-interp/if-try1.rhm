@@ -68,5 +68,3 @@ check:  parse('(1 + 2) * 4')
 
 check:  parse('2 2')
         ~raises "invalid input"
-
-// 4 minutes
