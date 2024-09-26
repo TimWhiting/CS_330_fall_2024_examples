@@ -1,0 +1,143 @@
+#lang shplait
+
+type Exp
+| intE(n :: Int)
+| plusE(l:: Exp, r:: Exp)
+| multE(l:: Exp, r:: Exp)
+| appE(f::Symbol, arg::Exp)
+| idE(s::Symbol)
+| letE(n::Symbol, rhs::Exp, body::Exp)
+
+type FunDef
+| fd(name :: Symbol, arg :: Symbol, body :: Exp)
+
+module test:
+  check:  parse('2')
+          ~is intE(2)
+  check:  parse('2 + 3')
+          ~is plusE(intE(2), intE(3))
+  check:  parse('2 * 3')
+          ~is multE(intE(2), intE(3))
+  check:  parse('(1 + 2) * 4')
+          ~is multE(plusE(intE(1), intE(2)), intE(4))
+  check:  parse('2 2')
+          ~raises "invalid input"
+  check:  parse('x')
+          ~is idE(#'x)
+  check:  parse('f(2)')
+          ~is appE(#'f, intE(2))
+  check:  parse('let x = 1 + 2: x')
+          ~is letE(#'x, plusE(intE(1), intE(2)), idE(#'x))
+
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | 'let $n = $e1: $e2': letE(syntax_to_symbol(n), parse(e1), parse(e2))
+      | '$e1 + $e2':
+          plusE(parse(e1), parse(e2))
+      | '$e1 * $e2':
+          multE(parse(e1), parse(e2))
+      | '$e1($e2)': appE(syntax_to_symbol(e1), parse(e2))
+      | '($e)': parse(e)
+      | ~else: error(#'parse, "invalid input " +& s)
+
+module test:
+  check:  parse_fundef('fun double(x): x + x')
+          ~is fd(#'double, #'x, plusE(idE(#'x), idE(#'x)))
+  check:  parse_fundef('fun invalid(): x')
+          ~raises "invalid input"
+
+  def double = parse_fundef('fun double(x): x + x')
+  def quadruple = parse_fundef('fun quadruple(x): double(x) + double(x)')
+
+fun parse_fundef(s :: Syntax) :: FunDef:
+  match s
+  | 'fun $name($arg): $body':
+      fd(syntax_to_symbol(name), syntax_to_symbol(arg), parse(body))
+  | ~else: error(#'parse_fundef, "invalid input " +& s)
+
+module test:
+  check:  get_fundef(#'double, [])
+          ~raises "undefined function"
+  check:  get_fundef(#'double, [double])
+          ~is double
+  check:  get_fundef(#'double, [quadruple, double])
+          ~is double
+  check:  get_fundef(#'quadruple, [double, quadruple])
+          ~is quadruple
+
+fun get_fundef(s :: Symbol, defs :: Listof(FunDef)) :: FunDef:
+  match defs
+  | []: error(#'get_fundef, "undefined function: " +& s)
+  | cons(df, rst_defs):
+      if fd.name(df) == s
+      | df
+      | get_fundef(s, rst_defs)
+
+module test:
+  check:  lookup(#'x, [])
+          ~raises "free variable"
+  check:  lookup(#'x, [bind(#'x, 3)])
+          ~is 3
+  check:  lookup(#'x, [bind(#'y, 3), bind(#'x, 4)])
+          ~is 4
+
+def mt_env = []
+def extend_env = cons
+type Binding
+| bind(name:: Symbol, val :: Int)
+type Env = Listof(Binding)
+
+fun lookup(s :: Symbol, env :: Listof(Binding)):: Int:
+  match env
+  | []: error(#'lookup, "free variable " +& s)
+  | cons(b, rst):
+      cond
+      | bind.name(b) == s: bind.val(b)
+      | ~else: lookup(s, rst)
+
+module test:
+  check:  interp(intE(3), [], []) // 3
+          ~is 3
+  check:  interp(plusE(intE(1), intE(3)), [], []) // 1 + 3
+          ~is 4
+  check:  interp(multE(intE(2), intE(4)), [], []) // 2 * 4
+          ~is 8
+  check:  interp(plusE(intE(1), multE(intE(2), intE(4))), [], []) // 1 + 2 * 4
+          ~is 9
+  check:  interp(idE(#'id), [], [])
+          ~raises "free variable"
+  check:  interp(parse('double(8)'), [], [double])
+          ~is 16
+  check:  interp(parse('quadruple(2)'), [], [double, quadruple])
+          ~is 8
+
+def f = parse_fundef('fun f(a): a + b')
+def f_exp = parse('let a = 1:
+                      let b = 2:
+                          f(10)')
+
+module test:
+  check:  interp(f_exp, [], [f])
+          ~is 12
+          
+fun interp(a :: Exp, env::Env, defs::Listof(FunDef)) :: Int:
+  match a
+  | intE(n): n
+  | idE(s): lookup(s, env)
+  | plusE(l, r): interp(l, env, defs) + interp(r, env, defs)
+  | multE(l, r): interp(l, env, defs) * interp(r, env, defs)
+  | appE(f, arg):
+      block:
+        def df = get_fundef(f, defs)
+        def argv = interp(arg, env, defs)
+        interp(fd.body(df), 
+               extend_env(bind(fd.arg(df), argv), env),    
+               defs)
+  | letE(n, rhs, body): 
+      interp(body, extend_env(bind(n, interp(rhs, env, defs)), env), defs)
