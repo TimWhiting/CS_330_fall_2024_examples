@@ -1,0 +1,364 @@
+#lang shplait
+
+
+macro 'test_returns $fn:
+         ($arg, ...): $ret
+         ...':
+            'block:
+               check: $fn($arg, ...)
+                      ~is $ret
+               ...'
+type Location = Int
+
+type Value
+| intV(n :: Int)
+| closV(arg :: Symbol,
+        body :: Exp,
+        env :: Env)
+| boxV(l :: Location)
+
+type Exp
+| intE(n :: Int)
+| idE(s :: Symbol)
+| plusE(l :: Exp,
+        r :: Exp)
+| multE(l :: Exp,
+        r :: Exp)
+| letE(n :: Symbol,
+       rhs :: Exp,
+       body :: Exp)
+| funE(n :: Symbol,
+       body :: Exp)
+| appE(fn :: Exp,
+       arg :: Exp)
+| boxE(arg :: Exp)
+| unboxE(arg :: Exp)
+| setboxE(bx :: Exp,
+          val :: Exp)
+| beginE(l :: Exp,
+         r :: Exp)
+
+type Binding
+| bind(name :: Symbol,
+       val :: Value)
+
+type Env = Listof(Binding)
+
+def mt_env = []
+def extend_env = cons
+
+type Storage
+| cell(location :: Location,
+       val :: Value)
+
+type Store = Listof(Storage)
+def mt_store = []
+def override_store = cons
+
+type Result
+| res(v :: Value,
+      s :: Store)
+
+// parse ----------------------------------------
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | 'let $name = $rhs:
+           $body':
+          letE(syntax_to_symbol(name),
+               parse(rhs),
+               parse(body))
+      | '$left + $right':
+          plusE(parse(left),
+                parse(right))
+      | '$left * $right':
+          multE(parse(left),
+                parse(right))
+      | 'fun ($id): $body':
+          funE(syntax_to_symbol(id),
+               parse(body))
+      | 'box($val_arg)':
+          boxE(parse(val_arg))
+      | 'unbox($bx_arg)':
+          unboxE(parse(bx_arg))
+      | 'set_box($bx_arg, $val_arg)':
+          setboxE(parse(bx_arg), parse(val_arg))
+      | '$fn($arg)':
+          appE(parse(fn),
+               parse(arg))
+      | 'begin:
+           $effect_exp
+           $result_exp':
+          beginE(parse(effect_exp), parse(result_exp))
+      | '($e)':
+          parse(e)
+      | ~else:
+          error(#'parse, "invalid input: " +& s)
+
+module test:
+  test_returns parse:
+    ('2'): intE(2)
+    ('x'): idE(#'x)
+    ('2 + 1'): plusE(intE(2), intE(1))
+    ('3 * 4'): multE(intE(3), intE(4))
+    ('3 * 4 + 8'): plusE(multE(intE(3), intE(4)),
+                         intE(8))
+    ('fun (x): 9'): funE(#'x, intE(9))
+    ('double(9)'): appE(idE(#'double), intE(9))
+    ('1 + double(9)'): plusE(intE(1), appE(idE(#'double), intE(9)))
+    ('3 * (4 + 8)'): multE(intE(3), plusE(intE(4), intE(8)))
+    ('let x = 1 + 2: y'): letE(
+                 #'x,
+                 plusE(intE(1), intE(2)),
+                 idE(#'y)
+    )
+    ('box(0)'): boxE(intE(0))
+    ('unbox(b)'): unboxE(idE(#'b))
+    ('set_box(b, 0)'): setboxE(idE(#'b), intE(0))
+    ('begin: 1; 2'): beginE(intE(1), intE(2))
+
+  check: parse('1 2')
+         ~raises "invalid input"
+
+// reslet form ----------------------------------------
+macro 'reslet ($v_id, $sto_id) = $call:
+         $body':
+  'match $call
+   | res($v_id, $sto_id):
+       $body'
+  
+// interp ----------------------------------------
+fun interp(a :: Exp, env :: Env, sto :: Store) :: Result:
+  match a
+  | intE(n): res(intV(n), sto)
+  | idE(s): res(lookup(s, env), sto)
+  | plusE(l, r): reslet (v_l, sto_l) = interp(l, env, sto):
+                   reslet (v_r, sto_r) = interp(r, env, sto_l):
+                     res(num_plus(v_l, v_r), sto_r)
+  | multE(l, r): reslet (v_l, sto_l) = interp(l, env, sto):
+                   reslet (v_r, sto_r) = interp(r, env, sto_l):
+                     res(num_mult(v_l, v_r), sto_r)
+  | letE(n, rhs, body):
+      reslet (v_rhs, sto_rhs) = interp(rhs, env, sto):
+        interp(body,
+               extend_env(bind(n, v_rhs),
+                          env),
+               sto_rhs)
+  | funE(n, body): res(closV(n, body, env), sto)
+  | appE(fn, arg):
+      reslet (v_fn, sto_fn) = interp(fn, env, sto):
+        match v_fn
+        | closV(n, body, c_env):
+            reslet (v_arg, sto_arg) = interp(arg, env, sto_fn):
+              interp(body,
+                     extend_env(bind(n, v_arg),
+                                c_env),
+                     sto_arg)
+        | ~else: error(#'interp, "not a function")
+  | boxE(a):
+      reslet (v, sto_v) = interp(a, env, sto):
+        block:
+          def l = new_loc(sto_v)
+          res(boxV(l),
+              override_store(cell(l, v),
+                             sto_v))
+  | unboxE(a):
+      reslet (v, sto_v) = interp(a, env, sto):
+        match v          
+        | boxV(l): res(fetch(l, sto_v),
+                       sto_v)                     
+        | ~else: error(#'interp, "not a box")
+  | setboxE(bx, val):
+      reslet (b_b, sto_b) = interp(bx, env, sto):
+        reslet (v_v, sto_v) = interp(val, env, sto_b):
+          match b_b
+          | boxV(l):
+              res(v_v,
+                  override_store(cell(l, v_v),
+                                 sto_v))
+          | ~else: error(#'interp, "not a box")
+  | beginE(l, r):
+      reslet (v_l, sto_l) = interp(l, env, sto):
+        interp(r, env, sto_l)
+
+module test:
+  check: interp(parse('2'), mt_env, mt_store)
+         ~is res(intV(2), mt_store)
+  check: interp(parse('x'), mt_env, mt_store)
+         ~raises "free variable"
+  check: interp(parse('x'),
+                extend_env(bind(#'x, intV(9)), mt_env),
+                mt_store)
+         ~is res(intV(9), mt_store)
+  check: interp(parse('2 + 1'), mt_env, mt_store)
+         ~is res(intV(3), mt_store)
+  check: interp(parse('2 * 1'), mt_env, mt_store)
+         ~is res(intV(2), mt_store)
+  check: interp(parse('(2 * 3) + (5 + 8)'), mt_env, mt_store)
+         ~is res(intV(19), mt_store)
+  check: interp(parse('fun (x): x + x'),
+                mt_env,
+                mt_store)
+         ~is res(closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env),
+                 mt_store)
+  check: interp(parse('let x = 5: x + x'),
+                mt_env,
+                mt_store)
+         ~is res(intV(10), mt_store)
+  check: interp(parse('let x = 5:
+                         let x = x + 1:
+                           x + x'),
+                mt_env,
+                mt_store)
+         ~is res(intV(12), mt_store)
+  check: interp(parse('let x = 5:
+                         let y = 6:
+                           x'),
+                mt_env,
+                mt_store)
+         ~is res(intV(5), mt_store)
+  check: interp(parse('(fun (x): x + x)(8)'),
+                mt_env,
+                mt_store)
+         ~is res(intV(16), mt_store)
+
+  check: interp(parse('box(5)'),
+                mt_env,
+                mt_store)
+         ~is res(boxV(1),
+                 override_store(cell(1, intV(5)),
+                                mt_store))
+  check: interp(parse('unbox(box(5))'),
+                mt_env,
+                mt_store)
+         ~is res(intV(5),
+                 override_store(cell(1, intV(5)),
+                                mt_store))
+  check: interp(parse('set_box(box(5), 6)'),
+                mt_env,
+                mt_store)
+         ~is res(intV(6),
+                 override_store(cell(1, intV(6)),
+                                override_store(cell(1, intV(5)),
+                                               mt_store)))
+  check: interp(parse('begin:
+                         1
+                         2'),
+                mt_env,
+                mt_store)
+         ~is res(intV(2), mt_store)
+  check: interp(parse('let b = box(5):
+                         begin:
+                           set_box(b, 6)
+                           unbox(b)'),
+                mt_env,
+                mt_store)
+         ~is res(intV(6),
+                 override_store(cell(1, intV(6)),
+                                override_store(cell(1, intV(5)),
+                                               mt_store)))
+
+  check: interp(parse('1(2)'), mt_env, mt_store)
+         ~raises "not a function"
+  check: interp(parse('1 + (fun (x): x)'), mt_env, mt_store)
+         ~raises "not a number"
+  check: interp(parse('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)'),
+                mt_env,
+                mt_store)
+         ~raises "free variable"
+
+  check: interp(parse('unbox(2)'), mt_env, mt_store)
+         ~raises "not a box"
+  check: interp(parse('set_box(2, 3)'), mt_env, mt_store)
+         ~raises "not a box"
+
+// num_plus and num_mult ----------------------------------------
+fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
+  cond
+  | l is_a intV && r is_a intV:
+      intV(op(intV.n(l), intV.n(r)))
+  | ~else:
+      error(#'interp, "not a number")
+fun num_plus(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a+b, l, r)
+fun num_mult(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a*b, l, r)
+
+module test:
+  check: num_plus(intV(1), intV(2))
+         ~is intV(3)
+  check: num_mult(intV(3), intV(2))
+         ~is intV(6)
+  
+// lookup ----------------------------------------
+fun lookup(n :: Symbol, env :: Env) :: Value:
+  match env
+  | []: error(#'lookup, "free variable: " +& n)
+  | cons(b, rst_env):
+      cond
+      | n == bind.name(b):
+          bind.val(b)
+      | ~else:
+          lookup(n, rst_env)
+
+module test:
+  check: lookup(#'x, mt_env)
+         ~raises "free variable"
+  check: lookup(#'x, extend_env(bind(#'x, intV(8)), mt_env))
+         ~is intV(8)
+  check: lookup(#'x, extend_env(bind(#'x, intV(9)),
+                                extend_env(bind(#'x, intV(8)),
+                                           mt_env)))
+         ~is intV(9)
+  check: lookup(#'y, extend_env(bind(#'x, intV(9)),
+                                extend_env(bind(#'y, intV(8)),
+                                           mt_env)))
+         ~is intV(8)
+
+// store operations ----------------------------------------
+
+fun new_loc(sto :: Store) :: Location:
+  1 + max_address(sto)
+
+fun max_address(sto :: Store) :: Location:
+  match sto
+  | []: 0
+  | cons(c, rst_sto): max(cell.location(c),
+                          max_address(rst_sto))
+
+fun fetch(l :: Location, sto :: Store) :: Value:
+  match sto
+  | []: error(#'interp, "unallocated location")
+  | cons(c, rst_sto): if l == cell.location(c)
+                      | cell.val(c)
+                      | fetch(l, rst_sto)
+
+module test:
+  check: new_loc(mt_store)
+         ~is 1
+       
+  check: max_address(mt_store)
+         ~is 0
+  check: max_address(override_store(cell(2, intV(9)),
+                                    mt_store))
+         ~is 2
+  check: fetch(2, override_store(cell(2, intV(9)),
+                                 mt_store))
+         ~is intV(9)
+  check: fetch(2, override_store(cell(2, intV(10)),
+                                 override_store(cell(2, intV(9)),
+                                                mt_store)))
+         ~is intV(10)
+  check: fetch(3, override_store(cell(2, intV(10)),
+                                 override_store(cell(3, intV(9)),
+                                                mt_store)))
+         ~is intV(9)
+  check: fetch(2, mt_store)
+         ~raises "unallocated location"
