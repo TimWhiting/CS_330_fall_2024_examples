@@ -132,9 +132,7 @@ fun interp(a :: Exp, env :: Env) :: Value:
                             c_env))
       | ~else: error(#'interp, "not a function")
   | recordE(ns, as):
-      recV(ns,
-           map(fun (a): interp(a, env),
-               as))
+      recV(ns, map(fun (a): interp(a, env), as))
   | getE(a, n):
       match interp(a, env)
       | recV(ns, vs): find(n, ns, vs)
@@ -245,7 +243,17 @@ fun update(n :: Symbol,
                         | cons(first(vs), update(n, v, ns_rst, rest(vs)))
 
 // We want to add a new field if it doesn't exist, and update it if it does.
-fun update_or_add()
+fun update_or_add(name :: Symbol, val :: Value,
+                  nList :: Listof(Symbol), vList :: Listof(Value)) :: Value:
+  match nList
+  | []: recV([name], [val])
+  | cons(ns_n, ns_rst): 
+      if name == ns_n
+      | recV(nList, cons(val, rest(vList)))
+      | match update_or_add(name, val, ns_rst, rest(vList))
+        | recV(new_names, new_values):
+            recV(cons(name, new_names), cons(first(vList), new_values))
+        | ~else: error(#'interp, "should never happen")
 
 module test:
   test_returns find:
