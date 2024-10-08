@@ -1,0 +1,7 @@
+#lang shplait
+
+// Practice using Y combinator
+
+// Mutual recursion (letrec+) multiple mutually recursive definitions
+
+// Encoding lists

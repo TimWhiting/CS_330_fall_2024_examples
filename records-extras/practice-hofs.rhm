@@ -1,0 +1,17 @@
+#lang shplait
+
+
+// Practice using fold and other higher order functions
+//  Implement `map` `filter` and `find`, or `append` using `fold`
+//  `find` (or `member`) using `filter` 
+//  `zip` and `fold2`
+//  Learning to think at the type level, and general functional patterns
+
+// Practice recursion <-> iteration
+//  What is `break` / `continue`?
+
+// Records (`add_or_update`)
+
+// Pair encoding (untyped)
+
+// Desugar multiple args (parse)
