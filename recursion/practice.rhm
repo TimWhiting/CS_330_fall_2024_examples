@@ -2,6 +2,10 @@
 
 // Practice using Y combinator
 
+// Memoization / dynamic programming
+
 // Mutual recursion (letrec+) multiple mutually recursive definitions
 
-// Encoding lists
+// Encoding lists (recursive types)
+
+// Recursive data 
