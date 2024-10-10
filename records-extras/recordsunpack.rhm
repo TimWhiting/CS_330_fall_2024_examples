@@ -1,0 +1,284 @@
+#lang shplait
+
+macro 'test_returns $fn:
+         ($arg, ...): $ret
+         ...':
+            'block:
+               check: $fn($arg, ...)
+                      ~is $ret
+               ...'
+
+macro 'test_errors $fn:
+         ($args, ...): $value
+         ...':
+      'begin:
+        check: $fn($args, ...)
+               ~raises $value
+        ...'
+
+type Value
+| intV(n :: Int)
+| closV(arg :: Symbol,
+        body :: Exp,
+        env :: Env)
+| recV(ns :: Listof(Symbol),
+       vs :: Listof(Value))
+
+type Exp
+| intE(n :: Int)
+| idE(s :: Symbol)
+| plusE(l :: Exp,
+        r :: Exp)
+| multE(l :: Exp,
+        r :: Exp)
+| letE(n :: Symbol,
+       rhs :: Exp,
+       body :: Exp)
+| funE(n :: Symbol,
+       body :: Exp)
+| appE(fn :: Exp,
+       arg :: Exp)
+| unpackE(rec :: Exp, syms::Listof(Symbol), new_syms :: Listof(Symbol), body:: Exp)
+| recordE(s :: Listof(Symbol),
+          args :: Listof(Exp))
+| getE(rec :: Exp,
+       n :: Symbol)
+| setE(rec :: Exp,
+       n :: Symbol,
+       val :: Exp)
+
+type Binding
+| bind(name :: Symbol,
+       val :: Value)
+
+type Env = Listof(Binding)
+
+def mt_env = []
+def extend_env = cons
+
+// parse ----------------------------------------
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | '{ $name: $field_exp, ...}':
+          recordE(map(syntax_to_symbol, syntax_to_list('[$name, ...]')),
+                  map(parse, syntax_to_list('[$field_exp, ...]')))
+      | '$exp with ($name = $field_exp)':
+          setE(parse(exp), syntax_to_symbol(name), parse(field_exp))
+      | 'let $name = $rhs:
+           $body':
+          letE(syntax_to_symbol(name),
+               parse(rhs),
+               parse(body))
+      | 'unpack $r = { $name : $new_name, ...}: $body':
+          unpackE(parse(r),
+                  map(syntax_to_symbol, syntax_to_list('[$name, ...]')),
+                  map(syntax_to_symbol, syntax_to_list('[$new_name, ...]')),
+                  parse(body))
+      | '$left + $right':
+          plusE(parse(left),
+                parse(right))
+      | '$left * $right':
+          multE(parse(left),
+                parse(right))
+      | '$exp . $name':
+          getE(parse(exp), syntax_to_symbol(name))
+      | 'fun ($id): $body':
+          funE(syntax_to_symbol(id),
+               parse(body))
+      | '$fn($arg)':
+          appE(parse(fn),
+               parse(arg))
+      | '($e)':
+          parse(e)
+      | ~else:
+          error(#'parse, "invalid input: " +& s)
+
+module test:
+  test_returns parse:
+    ('2'): intE(2)
+    ('x'): idE(#'x)
+    ('2 + 1'): plusE(intE(2), intE(1))
+    ('3 * 4'): multE(intE(3), intE(4))
+    ('3 * 4 + 8'): plusE(multE(intE(3), intE(4)), intE(8))
+    ('fun (x): 9'): funE(#'x, intE(9))
+    ('double(9)'): appE(idE(#'double), intE(9))
+    ('1 + double(9)'): plusE(intE(1), appE(idE(#'double), intE(9)))
+    ('3 * (4 + 8)'): multE(intE(3), plusE(intE(4), intE(8)))
+    ('let x = 1 + 2: y'): letE(#'x, plusE(intE(1), intE(2)), idE(#'y))
+    ('{ x: 2, y: 3 }'): recordE([#'x, #'y], [intE(2), intE(3)])
+    ('(1 + 2).a'): getE(plusE(intE(1), intE(2)), #'a)
+    ('(1 + 2) with (a = 7)'): setE(plusE(intE(1), intE(2)), #'a, intE(7))
+
+  check: parse('1 2')
+         ~raises "invalid input"
+      
+// interp ----------------------------------------
+fun interp(a :: Exp, env :: Env) :: Value:
+  match a
+  | intE(n): intV(n)
+  | idE(s): lookup(s, env)
+  | plusE(l, r): num_plus(interp(l, env), interp(r, env))
+  | multE(l, r): num_mult(interp(l, env), interp(r, env))
+  | letE(n, rhs, body):
+      interp(body,
+             extend_env(bind(n, interp(rhs, env)),
+                        env))
+  | funE(n, body): closV(n, body, env)
+  | appE(fn, arg):
+      match interp(fn, env)
+      | closV(n, body, c_env):
+          interp(body,
+                 extend_env(bind(n, interp(arg, env)),
+                            c_env))
+      | ~else: error(#'interp, "not a function")
+  | recordE(ns, as):
+      recV(ns, map(fun (a): interp(a, env), as))
+  | getE(a, n):
+      match interp(a, env)
+      | recV(ns, vs): find(n, ns, vs)
+      | ~else: error(#'interp, "not a record")
+  | setE(a, n, v):
+      match interp(a, env)
+      | recV(ns, vs):
+          recV(ns, update(n, interp(v, env), ns, vs))
+      | ~else: error(#'interp, "not a record")
+  | unpack(rexp, names, new_names, body):
+      .... r .... names ... new_names ... body ....
+      match interp(rexp, env)
+      | recV(rnames, rvalues): 
+          interp(body, add_all_bindings(new_names, find_fields(names, rnames, rvalues), env))
+
+
+
+module test:
+  test_returns interp:
+    (parse('2'), mt_env): intV(2)
+    (parse('x'), extend_env(bind(#'x, intV(9)), mt_env)): intV(9)
+    (parse('2 + 1'), mt_env): intV(3)
+    (parse('2 * 1'), mt_env): intV(2)
+    (parse('(2 * 3) + (5 + 8)'), mt_env): intV(19)
+    (parse('fun (x): x + x'), mt_env): closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env)
+    (parse('let x = 5: x + x'), mt_env): intV(10)
+    (parse('let x = 5: let x = x + 1: x + x'), mt_env): intV(12)
+    (parse('let x = 5: let y = 6: x'), mt_env): intV(5)
+    (parse('(fun (x): x + x)(8)'), mt_env): intV(16)
+    (parse('{ a: 1 + 1, b: 2 + 2 }'), mt_env): recV([#'a, #'b], [intV(2), intV(4)])
+    (parse('{ a: 1 + 1, b: 2 + 2 }.a'), mt_env): intV(2)
+    (parse('{ a: 1 + 1, b: 2 + 2 }.b'), mt_env): intV(4)
+    (parse('{ a: 1 + 1, b: 2 + 2 } with (a = 5)'), mt_env): recV([#'a, #'b], [intV(5), intV(4)])
+    (parse('let r1 = { a: 1 + 1, b: 2 + 2 }:
+                         let r2 = (r1 with (a = 5)):
+                           r1.a + r2.a'),
+     mt_env): intV(7)
+
+  test_errors interp:
+    (parse('x'), mt_env): "free variable"
+    (parse('1(2)'), mt_env): "not a function"
+    (parse('1 + (fun (x): x)'), mt_env): "not a number"
+    (parse('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)'),
+     mt_env): "free variable"
+    (parse('6 . x'), mt_env): "not a record"
+    (parse('6 with (x = 9)'), mt_env): "not a record"
+               
+// num_plus and num_mult ----------------------------------------
+fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
+  cond
+  | l is_a intV && r is_a intV:
+      intV(op(intV.n(l), intV.n(r)))
+  | ~else:
+      error(#'interp, "not a number")
+fun num_plus(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a+b, l, r)
+fun num_mult(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a*b, l, r)
+
+module test:
+  check: num_plus(intV(1), intV(2))
+         ~is intV(3)
+  check: num_mult(intV(3), intV(2))
+         ~is intV(6)
+  
+// lookup ----------------------------------------
+fun lookup(n :: Symbol, env :: Env) :: Value:
+  match env
+  | []: error(#'lookup, "free variable: " +& n)
+  | cons(b, rst_env):
+      cond
+      | n == bind.name(b):
+          bind.val(b)
+      | ~else:
+          lookup(n, rst_env)
+
+module test:
+  check: lookup(#'x, mt_env)
+         ~raises "free variable"
+  test_returns lookup:
+    (#'x, extend_env(bind(#'x, intV(8)), mt_env)): intV(8)
+    (#'x, extend_env(bind(#'x, intV(9)),
+                     extend_env(bind(#'x, intV(8)),
+                                mt_env))): intV(9)
+    (#'y, extend_env(bind(#'x, intV(9)),
+                     extend_env(bind(#'y, intV(8)),
+                                mt_env))): intV(8)
+                            
+// find & update ----------------------------------------
+
+// Takes a name and two parallel lists, returning an item from the
+// second list where the name matches the item from the first list.
+fun find(n :: Symbol,
+         ns :: Listof(Symbol),
+         vs :: Listof(Value)) :: Value:
+  match ns
+  | []: error(#'interp, "no such field: " +& n)
+  | cons(ns_n, ns_rst): if n == ns_n
+                        | first(vs)
+                        | find(n, ns_rst, rest(vs))
+
+// Takes a name n, value v, and two parallel lists, returning a list
+// like the second of the given lists, but with v in place
+// where n matches the item from the first list.
+fun update(n :: Symbol,
+           v :: Value,
+           ns :: Listof(Symbol),
+           vs :: Listof(Value)) :: Listof(Value):
+  match ns
+  | []: error(#'interp, "no such field: " +& n)
+  | cons(ns_n, ns_rst): if n == ns_n
+                        | cons(v, rest(vs))
+                        | cons(first(vs), update(n, v, ns_rst, rest(vs)))
+
+// We want to add a new field if it doesn't exist, and update it if it does.
+fun update_or_add(name :: Symbol, val :: Value,
+                  nList :: Listof(Symbol), vList :: Listof(Value)) :: Value:
+  match nList
+  | []: recV([name], [val])
+  | cons(ns_n, ns_rst): 
+      if name == ns_n
+      | recV(nList, cons(val, rest(vList)))
+      | match update_or_add(name, val, ns_rst, rest(vList))
+        | recV(new_names, new_values):
+            recV(cons(name, new_names), cons(first(vList), new_values))
+        | ~else: error(#'interp, "should never happen")
+
+module test:
+  test_returns find:
+    (#'a, [#'a, #'b], [intV(1), intV(2)]): intV(1)
+    (#'b, [#'a, #'b], [intV(1), intV(2)]): intV(2)
+  
+  check: find(#'a, [], [])
+         ~raises "no such field"
+
+  test_returns update:
+    (#'a, intV(0), [#'a, #'b], [intV(1), intV(2)]): [intV(0), intV(2)]
+    (#'b, intV(0), [#'a, #'b], [intV(1), intV(2)]): [intV(1), intV(0)]
+
+  check: update(#'a, intV(0), [], [])
+         ~raises "no such field"
