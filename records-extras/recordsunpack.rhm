@@ -148,13 +148,17 @@ fun interp(a :: Exp, env :: Env) :: Value:
       | recV(ns, vs):
           recV(ns, update(n, interp(v, env), ns, vs))
       | ~else: error(#'interp, "not a record")
-  | unpack(rexp, names, new_names, body):
-      .... r .... names ... new_names ... body ....
+  | unpackE(rexp, names, new_names, body):
       match interp(rexp, env)
       | recV(rnames, rvalues): 
           interp(body, add_all_bindings(new_names, find_fields(names, rnames, rvalues), env))
+      | ~else: error(#'interp, "not a record")
 
+fun add_all_bindings(names :: Listof(Symbol), vals :: Listof(Value), env :: Env) :: Env:
+  ....
 
+fun find_fields(names :: Listof(Symbol), rnames :: Listof(Symbol), rvalues :: Listof(Value)) :: Listof(Value):
+  ....
 
 module test:
   test_returns interp:
