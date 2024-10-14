@@ -252,7 +252,7 @@ fun update_or_add(name :: Symbol, val :: Value,
       | recV(nList, cons(val, rest(vList)))
       | match update_or_add(name, val, ns_rst, rest(vList))
         | recV(new_names, new_values):
-            recV(cons(name, new_names), cons(first(vList), new_values))
+            recV(cons(ns_n, new_names), cons(first(vList), new_values))
         | ~else: error(#'interp, "should never happen")
 
 module test:
