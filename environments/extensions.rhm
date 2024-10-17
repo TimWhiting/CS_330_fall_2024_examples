@@ -7,6 +7,7 @@ type Exp
 | appE(f::Symbol, arg::Exp)
 | idE(s::Symbol)
 | letE(n::Symbol, rhs::Exp, body::Exp)
+| letAllE(ns::Listof(Symbol), rhs::Listof(Exp), body::Exp)
 
 type FunDef
 | fd(name :: Symbol, arg :: Symbol, body :: Exp)
@@ -141,3 +142,7 @@ fun interp(a :: Exp, env::Env, defs::Listof(FunDef)) :: Int:
                defs)
   | letE(n, rhs, body): 
       interp(body, extend_env(bind(n, interp(rhs, env, defs)), env), defs)
+  | letAllE(ns, rhs, body):
+      // map2 is zipWith in other languages
+      // If you want create a fold2r
+      interp(body, append(env, map2(fun(n, r): bind(n, interp(r, env, defs)), ns, rhs)), defs)

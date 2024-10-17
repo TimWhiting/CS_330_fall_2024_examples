@@ -1,0 +1,57 @@
+#lang shplait
+~untyped
+
+
+
+fun make_car_class():
+  def speed_limit = 100
+  def mutable num_cars_created = 0
+  fun (self):
+    def mutable private_speed = 0
+    num_cars_created := num_cars_created + 1
+    fun accelerate(how_much): 
+      private_speed := private_speed + how_much
+    fun (method):
+      cond
+      |  method == #'speed : 
+          begin:
+            accelerate(-10)
+            if private_speed > speed_limit
+            | error(#'speed, "You got caught")
+            | private_speed
+      |  method == #'cars_created: num_cars_created
+      |  method == #'accelerate : accelerate
+
+def car_class = make_car_class()
+
+def c = car_class(car_class)
+c(#'speed)
+c(#'accelerate)(100)
+c(#'speed)
+c(#'cars_created)
+
+def c1 = car_class(car_class)
+c1(#'cars_created)
+
+
+fun make_dump_truck():
+  def super = make_car_class(make_dump_truck)
+  fun (self):
+    fun (method):
+      cond
+      |  method == #'speed : 
+          begin:
+            self(self)(#'accelerate)(-100)
+            super(self)(#'speed)
+      |  method == #'dump : 
+            if self(self)(#'speed) > 0
+            | error(#'dump, "Can't dump while moving")
+            | []
+      |  ~else: super(self)(method)
+
+
+def d = make_dump_truck()
+d(#'speed)
+d(#'accelerate)(1000)
+d(#'speed)
+d(#'dump)
