@@ -11,3 +11,6 @@ Or run in VSCode by installing the debug server, and going to the run/debug menu
 ```
 go install github.com/go-delve/delve/cmd/dlv@latest
 ```
+
+To learn some syntax you can go here:
+https://go.dev/tour/list
