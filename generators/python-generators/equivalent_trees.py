@@ -32,5 +32,5 @@ def new_tree(seed):
 def same(t1, t2):
     pass # TODO: implement this
 
-same(new_tree(0), new_tree(0))
-same(new_tree(0), new_tree(1))
+print(same(new_tree(0), new_tree(0)))
+print(same(new_tree(0), new_tree(1)))

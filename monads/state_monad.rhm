@@ -1,0 +1,64 @@
+#lang shplait
+
+macro 
+| 'do: 
+     return $m1 ...':
+     'return($m1 ...)'
+| 'do: 
+    $m1':
+    '$m1'
+| 'do:
+    $x <- return $m1
+    $m2
+    ...':
+    'bind(return($m1), 
+          fun($x): 
+             do:
+               $m2 
+               ...)'
+| 'do:
+    $x <- $m1
+    $m2
+    ...':
+    'bind($m1, 
+          fun($x): 
+             do:
+               $m2 
+               ...)'
+| 'do: 
+    return $m1 ...
+    $m2
+    ...':
+    'do:
+      return($m1 ...)
+      $m2
+      ...'
+| 'do: 
+    $m1
+    $m2
+    ...':
+    'bind($m1, 
+          fun(_): 
+             do:
+              $m2
+              ...)'
+
+type StateValue(?a, ?b)
+| SValue(value :: ?a, acc :: ?b)
+
+type StateM(?a) = ?b -> StateValue(?a, ?b)
+
+fun return(unwrapped :: ?a) :: (?b -> StateValue(?a, ?b)): 
+  fun(init_acc :: ?b): SValue(unwrapped, init_acc)
+
+fun bind(wrapped_value :: (?b -> StateValue(?a, ?b)), unwrap_transform :: (?a -> (?b -> StateValue(?c, ?b)))) :: (?b -> StateValue(?c, ?b)): 
+    fun(init_acc :: ?b): 
+      match wrapped_value(init_acc)
+      | SValue(next_value, next_acc): unwrap_transform(next_value)(next_acc)
+
+macro 'run_state $init:
+         $wrapped
+         ...':
+      '(do:
+          $wrapped
+          ...)($init)'

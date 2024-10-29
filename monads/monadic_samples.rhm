@@ -1,0 +1,133 @@
+#lang shplait
+
+macro 
+| 'do $bind $return: 
+     return $m1 ...':
+     '$return($m1 ...)'
+| 'do $bind $return: 
+    $m1':
+    '$m1'
+| 'do $bind $return:
+    $x <- return $m1
+    $m2
+    ...':
+    '$bind($return($m1), 
+           fun($x): 
+             do $bind $return:
+               $m2 
+               ...)'
+| 'do $bind $return:
+    $x <- $m1
+    $m2
+    ...':
+    '$bind($m1, 
+           fun($x): 
+             do $bind $return:
+               $m2 
+               ...)'
+| 'do $bind $return: 
+    return $m1 ...
+    $m2
+    ...':
+    'do $bind $return:
+      $return($m1 ...)
+      $m2
+      ...'
+| 'do $bind $return: 
+    $m1
+    $m2
+    ...':
+    '$bind($m1, 
+           fun(_): 
+             do $bind $return:
+              $m2
+              ...)'
+
+fun return_option(unwrapped :: ?a) :: Optionof(?a): 
+  some(unwrapped)
+
+fun bind_option(wrapped_value :: Optionof(?a), unwrap_transform :: (?a -> Optionof(?b))) :: Optionof(?b): 
+  match wrapped_value
+  | some(x): unwrap_transform(x)
+  | none(): none()
+
+fun divide(x :: Int, y :: Int) :: Optionof(Int): 
+  if y == 0 
+  | none()
+  | return_option(x / y)
+  
+fun divide_add(x :: Int, y :: Int, z :: Int) :: Optionof(Int): 
+  bind_option(divide(x, y), fun(v): return_option(v + z))
+
+fun double_divide(x :: Int, y :: Int) :: Optionof(Int): 
+  bind_option(divide(x, y), fun(v): divide(v, y))
+
+macro 'do_option:
+          $wrapped
+          ...':
+        '(do bind_option return_option:
+            $wrapped
+            ...)'
+
+fun divide_add2(x :: Int, y :: Int, z :: Int) :: Optionof(Int): 
+  do_option:
+    v <- divide(x, y)
+    return v + z
+
+fun double_divide2(x :: Int, y :: Int) :: Optionof(Int):
+  do_option:
+    v <- divide(x, y)
+    divide(v, y)
+
+double_divide2(100, 2)
+
+type StateValue(?a, ?b)
+| SValue(value :: ?a, acc :: ?b)
+
+type StateM(?a) = ?b -> StateValue(?a, ?b)
+
+fun return_state(unwrapped :: ?a) :: (?b -> StateValue(?a, ?b)): 
+  fun(init_acc :: ?b): SValue(unwrapped, init_acc)
+
+fun bind_state(wrapped_value :: (?b -> StateValue(?a, ?b)), unwrap_transform :: (?a -> (?b -> StateValue(?c, ?b)))) :: (?b -> StateValue(?c, ?b)): 
+    fun(init_acc :: ?b): 
+      match wrapped_value(init_acc)
+      | SValue(next_value, next_acc): unwrap_transform(next_value)(next_acc)
+    
+// fun run_state(wrapped :: (?b -> StateValue(?a, ?b)), init_s :: ?b) :: StateValue(?b, ?a): 
+//   wrapped(init_s)
+macro 'run_state $init:
+         $wrapped
+         ...':
+      '(do bind_state return_state:
+          $wrapped
+          ...)($init)'
+
+fun get() :: (?b -> StateValue(?b, ?b)): 
+  fun(acc :: ?b): 
+    SValue(acc, acc)
+
+fun set(acc_new :: ?b) :: (?c -> StateValue(Void, ?b)): 
+  fun(acc :: ?c): 
+    SValue(#void, acc_new)
+
+fun update(transform :: ?b -> ?b) :: (?b -> StateValue(Void, ?b)): 
+  fun(acc :: ?c): 
+    SValue(#void, transform(acc))
+
+// Sometimes we do want access to the state / accumulated value.
+// Unfortunately bind doesn't give us access to the state, only the value, and return only wraps a value.
+// So let's implement another function that is implemented not using the state monad, 
+//   but as another behavior that matches the signature for the state monad.
+// In this case, we specialize it to work only when the accumulated state is a string.
+fun log(value :: ?a) :: (String -> StateValue(Void, String)): 
+  fun(init_s :: String): SValue(#void, if init_s == "" | value | init_s +& " " +& value)
+
+// With a couple additions to the do macro, so we don't have to bind the Void return value of log
+// we end up with the following example of using the state monad.
+run_state "": // Starting state is the empty string
+  log("hello") // Log some things to the state world
+  a <- return 1 + 2 // do some computation in the value world
+  log("world")
+  return a + 3 // More computation with values
+// Result: SValue(6, "hello world")

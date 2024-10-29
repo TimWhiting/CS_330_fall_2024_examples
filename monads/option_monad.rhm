@@ -1,0 +1,52 @@
+#lang shplait
+
+macro 
+| 'do: 
+     return $m1 ...':
+     'return($m1 ...)'
+| 'do: 
+    $m1':
+    '$m1'
+| 'do:
+    $x <- return $m1
+    $m2
+    ...':
+    'bind(return($m1), 
+          fun($x): 
+             do:
+               $m2 
+               ...)'
+| 'do:
+    $x <- $m1
+    $m2
+    ...':
+    'bind($m1, 
+          fun($x): 
+             do:
+               $m2 
+               ...)'
+| 'do: 
+    return $m1 ...
+    $m2
+    ...':
+    'do:
+      return($m1 ...)
+      $m2
+      ...'
+| 'do: 
+    $m1
+    $m2
+    ...':
+    'bind($m1, 
+          fun(_): 
+             do:
+              $m2
+              ...)'
+
+fun return(unwrapped :: ?a) :: Optionof(?a): 
+  some(unwrapped)
+
+fun bind(wrapped_value :: Optionof(?a), unwrap_transform :: (?a -> Optionof(?b))) :: Optionof(?b): 
+  match wrapped_value
+  | some(x): unwrap_transform(x)
+  | none(): none()
