@@ -1,0 +1,276 @@
+#lang shplait
+
+type Value
+| intV(n :: Int)
+| closV(arg :: Symbol,
+        body :: Exp,
+        env :: Env)
+
+type Exp
+| intE(n :: Int)
+| idE(s :: Symbol)
+| plusE(l :: Exp,
+        r :: Exp)
+| multE(l :: Exp,
+        r :: Exp)
+| funE(n :: Symbol,
+       body :: Exp)
+| appE(fn :: Exp,
+       arg :: Exp)
+| letE(n :: Symbol,
+       rhs :: Exp,
+       body :: Exp)
+
+type Binding
+| bind(name :: Symbol,
+       val :: Value)
+
+type Env = Listof(Binding)
+
+def mt_env = []
+def extend_env = cons
+
+type Cont
+| doneK()
+| plusSecondK(r :: Exp,
+              e :: Env,
+              k :: Cont)
+| doPlusK(v :: Value,
+          k :: Cont)
+| multSecondK(r :: Exp,
+              e :: Env,
+              k :: Cont)
+| doMultK(v :: Value,
+          k :: Cont)
+| appArgK(a :: Exp,
+          env :: Env,
+          k :: Cont)
+| doAppK(f :: Value,
+         k :: Cont)
+| letK(x :: Symbol, e2 :: Exp, env :: Env, k :: Cont)
+
+// parse ----------------------------------------
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | 'let $name = $rhs:
+           $body':
+          letE(syntax_to_symbol(name), parse(rhs), parse(body))              
+      | '$left + $right':
+          plusE(parse(left),
+                parse(right))
+      | '$left * $right':
+          multE(parse(left),
+                parse(right))
+      | 'fun ($id): $body':
+          funE(syntax_to_symbol(id),
+               parse(body))
+      | '$fn($arg)':
+          appE(parse(fn),
+               parse(arg))
+      | '($e)':
+          parse(e)
+      | ~else:
+          error(#'parse, "invalid input: " +& s)
+
+module test:
+  check: parse('2')
+         ~is intE(2)
+  check: parse('x')
+         ~is idE(#'x)
+  check: parse('2 + 1')
+         ~is plusE(intE(2), intE (1))
+  check: parse('3 * 4')
+         ~is multE(intE(3), intE(4))
+  check: parse('3 * 4 + 8')
+         ~is plusE(multE(intE(3), intE(4)),
+                   intE(8))
+  check: parse('fun (x): 9')
+         ~is funE(#'x, intE(9))
+  check: parse('double(9)')
+         ~is appE(idE(#'double), intE(9))
+  check: parse('1 + double(9)')
+         ~is plusE(intE(1),
+                   appE(idE(#'double), intE(9)))
+  check: parse('3 * (4 + 8)')
+         ~is multE(intE(3),
+                   plusE(intE(4), intE(8)))
+  check: parse('let x = 1 + 2:
+                  y')
+         ~is appE(funE(#'x,
+                       idE(#'y)),
+                  plusE(intE(1), intE(2)))                  
+  check: parse('1 2')
+         ~raises "invalid input"
+      
+// interp ----------------------------------------
+fun interp(a :: Exp, env :: Env, k :: Cont) :: Value:
+  match a
+  | intE(n): continue(k, intV(n))
+  | idE(s): continue(k, lookup(s, env))
+  | plusE(l, r): interp(l, env,
+                        plusSecondK(r, env, k))
+  | multE(l, r): interp(l, env,
+                        multSecondK(r, env, k))
+  | funE(n, body): continue(k, closV(n, body, env))
+  | appE(fn, arg): interp(fn, env,
+                          appArgK(arg, env, k))
+  | letE(s, rhs, body): interp(rhs, env,
+                               letK(s, body, env, k))
+  | throwE(s): errorV(s)
+      
+
+fun continue(k :: Cont, v :: Value) :: Value:
+  match k
+  | doneK(): v
+  | plusSecondK(r, env, next_k):
+      interp(r, env,
+             doPlusK(v, next_k))
+  | doPlusK(v_l, next_k):
+      continue(next_k, num_plus(v_l, v))
+  | multSecondK(r, env, next_k):
+      interp(r, env,
+             doMultK(v, next_k))
+  | doMultK(v_l, next_k):
+      continue(next_k, num_mult(v_l, v))
+  | appArgK(a, env, next_k):
+      interp(a, env,
+             doAppK(v, next_k))
+  | doAppK(v_f, next_k):
+      match v_f
+      | closV(n, body, c_env):
+          interp(body,
+                 extend_env(bind(n, v),
+                            c_env),
+                 next_k)
+      | ~else: error(#'interp, "not a function")
+  | letK(s, body, env, next_k):
+      interp(body, extend_env(bind(s, v), env), next_k)
+
+module test:
+  check: interp(parse('2'), mt_env, doneK())
+         ~is intV(2)
+  check: interp(parse('x'), mt_env, doneK())
+         ~raises "free variable"
+  check: interp(parse('x'),
+                extend_env(bind(#'x, intV(9)), mt_env),
+                doneK())
+         ~is intV(9)
+  check: interp(parse('2 + 1'), mt_env, doneK())
+         ~is intV(3)
+  check: interp(parse('2 * 1'), mt_env, doneK())
+         ~is intV(2)
+  check: interp(parse('(2 * 3) + (5 + 8)'), mt_env, doneK())
+         ~is intV(19)
+  check: interp(parse('fun (x): x + x'),
+                mt_env,
+                doneK())
+         ~is closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env)
+  check: interp(parse('let x = 5: x + x'),
+                mt_env,
+                doneK())
+         ~is intV(10)
+  check: interp(parse('let x = 5:
+                         let x = x + 1:
+                           x + x'),
+                mt_env,
+                doneK())
+         ~is intV(12)
+  check: interp(parse('let x = 5:
+                         let y = 6:
+                           x'),
+                mt_env,
+                doneK())
+         ~is intV(5)
+  check: interp(parse('(fun (x): x + x)(8)'),
+                mt_env,
+                doneK())
+         ~is intV(16)
+  check: interp(parse('1(2)'), mt_env, doneK())
+         ~raises "not a function"
+  check: interp(parse('1 + (fun (x): x)'), mt_env, doneK())
+         ~raises "not a number"
+  check: interp(parse('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)'),
+                mt_env,
+                doneK())
+         ~raises "free variable"
+
+  // Eager:
+  check: interp(parse('(fun (x): 0)(1(2))'), mt_env, doneK())
+         ~raises "not a function"
+
+  check: continue(doneK(), intV(5))
+         ~is intV(5)
+  check: continue(plusSecondK(intE(6), mt_env, doneK()), intV(5))
+         ~is intV(11)
+  check: continue(doPlusK(intV(7), doneK()), intV(5))
+         ~is intV(12)
+  check: continue(multSecondK(intE(6), mt_env, doneK()), intV(5))
+         ~is intV(30)
+  check: continue(doMultK(intV(7), doneK()), intV(5))
+         ~is intV(35)
+  check: continue(appArgK(intE(5), mt_env, doneK()), closV(#'x, idE(#'x), mt_env))
+         ~is intV(5)
+  check: continue(doAppK(closV(#'x, idE(#'x), mt_env), doneK()), intV(8))
+         ~is intV(8)
+                       
+// num_plus and num_mult ----------------------------------------
+fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
+  cond
+  | l is_a intV && r is_a intV:
+      intV(op(intV.n(l), intV.n(r)))
+  | ~else:
+      error(#'interp, "not a number")
+fun num_plus(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a+b, l, r)
+fun num_mult(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a*b, l, r)
+
+module test:
+  check: num_plus(intV(1), intV(2))
+         ~is intV(3)
+  check: num_mult(intV(3), intV(2))
+         ~is intV(6)
+  
+// lookup ----------------------------------------
+fun lookup(n :: Symbol, env :: Env) :: Value:
+  match env
+  | []: error(#'lookup, "free variable: " +& n)
+  | cons(b, rst_env):
+      cond
+      | n == bind.name(b):
+          bind.val(b)
+      | ~else:
+          lookup(n, rst_env)
+
+module test:
+  check: lookup(#'x, mt_env)
+         ~raises "free variable"
+  check: lookup(#'x, extend_env(bind(#'x, intV(8)), mt_env))
+         ~is intV(8)
+  check: lookup(#'x, extend_env(bind(#'x, intV(9)),
+                                extend_env(bind(#'x, intV(8)),
+                                           mt_env)))
+         ~is intV(9)
+  check: lookup(#'y, extend_env(bind(#'x, intV(9)),
+                                extend_env(bind(#'y, intV(8)),
+                                           mt_env)))
+         ~is intV(8)
+
+
+#//
+trace interp:
+  trace continue:
+    continue(appArgK(parse('fun (f): f(y)'),
+                     extend_env(bind(#'y, intV(5)), mt_env),
+                     doneK()),
+             closV(#'g,
+                   parse('g(fun (q): q + (-1 * y))'),
+                   extend_env(bind(#'y, intV(7)), mt_env)))
