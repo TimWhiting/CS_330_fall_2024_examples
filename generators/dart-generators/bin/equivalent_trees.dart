@@ -34,13 +34,30 @@ class Tree {
     return 'Node($left, $value, $right)';
   }
 
-  Iterable<int> walk(tree) sync* {
-    // TODO: This
+  Iterable<int> walk() sync* {
+    if (left != null) {
+      // for (final lv in left!.walk()){
+      //   yield lv;
+      // }
+      yield* left!.walk();
+    }
+    yield value;
+    if (right != null) {
+      yield* right!.walk();
+    }
   }
 }
 
 bool same(Tree tree1, Tree tree2) {
-  // TODO: This
+  final tree2l = tree2.walk().toList();
+  var length = 0;
+  for (final (i, x) in tree1.walk().indexed){
+    if (x != tree2l[i]) {
+      return false;
+    }
+    length++;
+  }
+  return length == tree2l.length;
 }
 
 void main() {
