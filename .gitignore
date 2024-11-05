@@ -1,2 +1,3 @@
 *.rhm~
 !.vscode/extensions.json
+.koka
