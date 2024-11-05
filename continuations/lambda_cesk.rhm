@@ -136,7 +136,6 @@ type Cont
              k :: Cont)
 | functionBoundaryK(k :: Cont)
 | returnK(k :: Cont)
-// TODO: You will need to add something here for return
 
 // parse ----------------------------------------
 fun parse(s :: Syntax) :: Exp:
@@ -391,7 +390,6 @@ fun get_next_k(k :: Cont) :: Cont:
   | whileCondK(_, __, ___, next_k): next_k
   | functionBoundaryK(next_k): next_k
   | returnK(next_k): next_k
-// TODO: Add something here for return
 
 module test:
   check: interp(parse('2'), mt_env, [], doneK())
