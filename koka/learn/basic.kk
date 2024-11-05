@@ -6,7 +6,7 @@ module learn/basic
 // Named function declarations use `fun`
 // while anonymous function expressions use `fn`
 fun example1() {
-  map( list(1,5), fn(i){ println(i) } )
+  foreach( list(1,5), fn(i){ println(i) } )
 }
 
 // Indented blocks get automatic curly braces (if not braced explicitly)
@@ -54,7 +54,7 @@ fun twice(f)
   f()
 
 fun example4()
-  twice{ println("hi") }    // == `twice( fn(){ println("hi" ) } )`
+  twice { println("hi") }    // == `twice( fn(){ println("hi" ) } )`
 
 
 // Or with indentation:
@@ -67,7 +67,7 @@ fun example4a()
 // like `while`:
 fun example5()
   var i := 0
-  while{ i < 10 }
+  while { i < 10 }
     i := i + 1
     println(i)
 
@@ -100,9 +100,15 @@ fun increment2(xs) {
 }
 
 // Use trace for debug output
-fun example-trace(): ()
+fun example-trace(): exn ()
   trace-info("example trace")       // `trace-info` also traces the current file and line number.
   trace("module: " ++ kk-module)
+  throw("Error")
+
+fun example-trace-use(): ()
+  match try(example-trace)
+    Ok(v) -> ()
+    Error(e) -> trace(e.message)
 
 pub fun main()
   example1()

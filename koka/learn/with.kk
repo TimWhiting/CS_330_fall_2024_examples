@@ -29,9 +29,9 @@ pub fun example1()
 
 // The above is equivalent to:
 pub fun example1-expanded()
-  twice
-    twice
-      println("hi")
+  with twice
+  twice fn()
+    println("hi")
 
 
 // Without using layout, the fully expanded version is:

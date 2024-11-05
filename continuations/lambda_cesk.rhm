@@ -1,0 +1,526 @@
+#lang shplait
+
+type Value
+| intV(n :: Int)
+| boolV(b :: Boolean)
+| voidV()
+| closV(arg :: Symbol,
+        body :: Exp,
+        env :: Env)
+| errorV(s :: String)
+| boxV(l :: Location)
+
+type Location = Int
+type Store = Listof(Location * Value)
+type Env = Listof(Symbol * Location)
+
+def mt_env = []
+def extend_env = cons
+def mt_store = []
+def extend_store = cons
+
+// find ----------------------------------------
+fun find(n :: ?a, mapping :: Listof(?a * ?b)) :: Optionof(?b):
+  match mapping
+  | []: none()
+  | cons(b, rst_mapping):
+      def values(n1, v) = b
+      if n == n1
+      | some(v)
+      | find(n, rst_mapping)
+
+// lookup ----------------------------------------
+fun lookup(n :: Symbol, env :: Env, st :: Store, k :: Cont) :: Value:
+  match find(n, env)
+  | none(): errorV("free variable: " +& n)
+  | some(loc):
+      match find(loc, st)
+      | none(): errorV("unbound location: " +& loc)
+      | some(v): continue(k, st, v)
+
+fun new_location_(st :: Store, curr_max):: Location :
+  match st
+  | []: curr_max + 1
+  | cons(b, rst):
+      def values(l, v) = b
+      new_location_(rst, max(curr_max, l))
+
+fun new_location(st :: Store) :: Location:
+  new_location_(st, -1)
+
+module test:
+  check: lookup(#'x, mt_env, mt_store, doneK())
+         ~is errorV("free variable: x")
+  check: lookup(#'x, mt_env, mt_store, doPlusK(intV(0), doneK()))
+         ~is errorV("free variable: x")
+  check: lookup(#'x, [values(#'x, 0)], [values(0, intV(8))], doneK())
+         ~is intV(8)
+  check: lookup(#'x, [values(#'x, 0)], [], doneK())
+         ~is errorV("unbound location: 0")
+  check: lookup(#'x, [values(#'x, 0), values(#'x, 1)], [values(0, intV(9)), values(1, intV(8))], doneK())
+         ~is intV(9)
+  check: lookup(#'y, [values(#'x, 0), values(#'y, 1)], [values(0, intV(9)), values(1, intV(8))], doneK())
+         ~is intV(8)
+
+type Exp
+| intE(n :: Int)
+| boolE(b :: Boolean)
+| idE(s :: Symbol)
+| plusE(l :: Exp,
+        r :: Exp)
+| multE(l :: Exp,
+        r :: Exp)
+| funE(n :: Symbol,
+       body :: Exp)
+| appE(fn :: Exp,
+       arg :: Exp)
+| boxE(init :: Exp)
+| unboxE(boxE :: Exp)
+| setboxE(boxE :: Exp,
+          new_val :: Exp)
+| beginE(firstE :: Exp, secondE :: Exp)
+| ifE(conditionE :: Exp,
+      thenE :: Exp,
+      elseE :: Exp)
+| whileE(conditionE :: Exp, body :: Exp)
+| eqE(l :: Exp, r :: Exp)
+| notE(e :: Exp)
+| breakE()
+| continueE()
+| returnE(valE :: Exp)
+
+type Cont
+| doneK()
+| plusSecondK(r :: Exp,
+              e :: Env,
+              k :: Cont)
+| doPlusK(v :: Value,
+          k :: Cont)
+| multSecondK(r :: Exp,
+              e :: Env,
+              k :: Cont)
+| doMultK(v :: Value,
+          k :: Cont)
+| appArgK(a :: Exp,
+          env :: Env,
+          k :: Cont)
+| doAppK(f :: Value,
+         k :: Cont)
+| boxK(k :: Cont)
+| unboxK(k :: Cont)
+| setboxArgK(new_val :: Exp,
+             env :: Env,
+             k :: Cont)
+| setboxK(l :: Location,
+          k :: Cont)
+| beginSecondK(s :: Exp,
+               env :: Env,
+               k :: Cont)
+| ifK(thenE :: Exp,
+      elseE :: Exp,
+      env :: Env,
+      k :: Cont)
+| notK(k :: Cont)
+| eqLeftK(left_exp :: Exp,
+          env :: Env,
+          k :: Cont)
+| eqRightK(left_val :: Value,
+           k :: Cont)
+| whileBodyK(conditionE :: Exp,
+             body :: Exp,
+             env :: Env,
+             k :: Cont)
+| whileCondK(conditionE:: Exp,
+             body :: Exp,
+             env :: Env,
+             k :: Cont)
+| functionBoundaryK(k :: Cont)
+| returnK(k :: Cont)
+// TODO: You will need to add something here for return
+
+// parse ----------------------------------------
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      match s
+      | 'break': breakE()
+      | 'continue': continueE()
+      | 'false': boolE(#false)
+      | 'true': boolE(#true)
+      | 'continue': continueE()
+      | ~else: idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | 'box($e)' : boxE(parse(e))
+      | 'unbox($e)' : unboxE(parse(e))
+      | 'set_box($bE, $new_val)' : setboxE(parse(bE), parse(new_val))
+      | 'not $e':
+          notE(parse(e))
+      | 'begin:
+            $f': parse(f)
+      | 'begin:
+           $f
+           $s
+           ...':
+          beginE(parse(f), parse('begin: 
+                                    $s
+                                    ...'))
+      | 'if $condE
+         | $thenE
+         | $elseE':
+          ifE(parse(condE), 
+              parse('begin: 
+                      $thenE'), 
+              parse('begin:
+                      $elseE'))
+      | 'while $condE:
+           $body
+           ...':
+            whileE(parse(condE), parse('begin: 
+                                          $body
+                                          ...'))
+      | 'return $valE':
+          returnE(parse(valE))
+      | 'let $name = $rhs:
+           $body
+           ...':
+          appE(funE(syntax_to_symbol(name),
+                    parse('begin: 
+                            $body
+                            ...')),
+               parse(rhs))   
+      | '$left == $right':
+          eqE(parse(left),
+              parse(right))  
+      | '$left != $right':
+          notE(eqE(parse(left),
+                   parse(right)))          
+      | '$left + $right':
+          plusE(parse(left),
+                parse(right))
+      | '$left * $right':
+          multE(parse(left),
+                parse(right))
+      | 'fun ($id): 
+            $body
+            ...':
+          funE(syntax_to_symbol(id),
+               parse('begin: 
+                        $body
+                        ...'))
+      | '$fn($arg)':
+          appE(parse(fn),
+               parse(arg))
+      | '($e)':
+          parse(e)
+      | ~else:
+          error(#'parse, "invalid input: " +& s)
+
+module test:
+  check: parse('2')
+         ~is intE(2)
+  check: parse('x')
+         ~is idE(#'x)
+  check: parse('2 + 1')
+         ~is plusE(intE(2), intE (1))
+  check: parse('3 * 4')
+         ~is multE(intE(3), intE(4))
+  check: parse('3 * 4 + 8')
+         ~is plusE(multE(intE(3), intE(4)),
+                   intE(8))
+  check: parse('fun (x): 9')
+         ~is funE(#'x, intE(9))
+  check: parse('double(9)')
+         ~is appE(idE(#'double), intE(9))
+  check: parse('1 + double(9)')
+         ~is plusE(intE(1),
+                   appE(idE(#'double), intE(9)))
+  check: parse('3 * (4 + 8)')
+         ~is multE(intE(3),
+                   plusE(intE(4), intE(8)))
+  check: parse('let x = 1 + 2:
+                  y')
+         ~is appE(funE(#'x,
+                       idE(#'y)),
+                  plusE(intE(1), intE(2)))                  
+  check: parse('1 2')
+         ~raises "invalid input"
+  check: parse('box(2)')
+         ~is boxE(intE(2))
+  check: parse('unbox(box(2))')
+         ~is unboxE(boxE(intE(2)))
+  check: parse('set_box(box(2), 3)')
+         ~is setboxE(boxE(intE(2)), intE(3))
+  check: parse('begin:
+                  1
+                  2')
+         ~is beginE(intE(1), intE(2))
+  check: parse('if 1
+                | 2
+                | 3')
+         ~is ifE(intE(1), intE(2), intE(3))
+  check: parse('while 1:
+                 2')
+         ~is whileE(intE(1), intE(2))
+  check: parse('break')
+         ~is breakE()
+  check: parse('continue')
+         ~is continueE()
+  check: parse('return 1')
+         ~is returnE(intE(1))
+      
+// interp ----------------------------------------
+fun interp(a :: Exp, env :: Env, st :: Store, k :: Cont) :: Value:
+  match a
+  | intE(n): continue(k, st, intV(n))
+  | boolE(n): continue(k, st, boolV(n))
+  | idE(s): lookup(s, env, st, k)
+  | plusE(l, r): interp(l, env, st, plusSecondK(r, env, k))
+  | multE(l, r): interp(l, env, st, multSecondK(r, env, k))
+  | funE(n, body): continue(k, st, closV(n, body, env))
+  | appE(fn, arg): interp(fn, env, st, appArgK(arg, env, k))
+  | boxE(e): interp(e, env, st, boxK(k))
+  | unboxE(e): interp(e, env, st, unboxK(k))
+  | setboxE(bE, new_val): interp(bE, env, st, setboxArgK(new_val, env, k))
+  | beginE(f, s): interp(f, env, st, beginSecondK(s, env, k))
+  | ifE(condE, thenE, elseE): interp(condE, env, st, ifK(thenE, elseE, env, k))
+  | whileE(condE, body): interp(condE, env, st, whileBodyK(condE, body, env, k))
+  | eqE(l, r): interp(l, env, st, eqLeftK(r, env, k))
+  | notE(e): interp(e, env, st, notK(k))
+  | breakE(): .... // TODO: Implement
+  | continueE(): .... // TODO: Implement
+  | returnE(rexp): interp(rexp, env, st, returnK(k))
+
+fun continue(k :: Cont, st :: Store, v :: Value) :: Value:
+  match k
+  | doneK(): v
+  | plusSecondK(r, env, next_k): interp(r, env, st, doPlusK(v, next_k))
+  | doPlusK(v_l, next_k): num_plus(v_l, v, st, next_k)
+  | multSecondK(r, env, next_k): interp(r, env, st, doMultK(v, next_k))
+  | doMultK(v_l, next_k): num_mult(v_l, v, st, next_k)
+  | appArgK(a, env, next_k): interp(a, env, st, doAppK(v, next_k))
+  | doAppK(v_f, next_k):
+      match v_f
+      | closV(n, body, c_env):
+          def l = new_location(st)
+          interp(body,
+                 extend_env(values(n, l), c_env), 
+                 extend_store(values(l, v), st),
+                 // TODO: Set up function boundary
+                 next_k)
+      | ~else: errorV("not a function")
+  | notK(next_k):
+      match v
+      | boolV(b): continue(next_k, st, boolV(if b | #false | #true))
+      | ~else: errorV("not a boolean")
+  | boxK(next_k): 
+      def l = new_location(st)
+      continue(next_k, extend_store(values(l, v), st), boxV(l))
+  | unboxK(next_k):
+      match v
+      | boxV(l): 
+          match find(l, st)
+          | none(): errorV("unbound location: " +& l)
+          | some(v): continue(next_k, st, v)
+      | ~else: errorV("not a box")
+  | setboxArgK(new_val, env, next_k):
+      match v
+      | boxV(l): interp(new_val, env, st, setboxK(l, next_k))
+      | ~else: errorV("not a box")
+  | setboxK(l, next_k):
+      continue(next_k, extend_store(values(l, v), st), v)
+  | beginSecondK(s, env, next_k): // Ignore the first value
+      interp(s, env, st, next_k)
+  | ifK(thenE, elseE, env, next_k):
+      if boolV.b(v)
+      | interp(thenE, env, st, next_k)
+      | interp(elseE, env, st, next_k)
+  | eqLeftK(rexp, env, next_k):
+      interp(rexp, env, st, eqRightK(v, next_k))
+  | eqRightK(lv, next_k):
+      match lv
+      | boolV(b1):
+          match v
+          | boolV(b2): continue(next_k, st, boolV(b1 == b2))
+          | ~else: errorV("equality of different types " +& b1 +& " and " +& v)
+      | intV(n1):
+          match v
+          | intV(n2): continue(next_k, st, boolV(n1 == n2))
+          | ~else: errorV("equality of different types " +& n1 +& " and " +& v)
+      | ~else: errorV("equality of different types " +& lv +& " and " +& v)
+  | whileBodyK(condE, body, env, next_k): 
+      // Condition has come back, and now we need to see if we need to evaluate the body
+      if boolV.b(v)
+      | interp(body, env, st, whileCondK(condE, body, env, next_k))
+      | continue(next_k, st, voidV()) // When done return void -- need state to observe anything
+  | whileCondK(condE, body, env, next_k):
+      // Remember the value of the body (to return when the loop)
+      interp(condE, env, st, whileBodyK(condE, body, env, next_k))
+  | functionBoundaryK(next_k):
+      continue(next_k, st, v)
+  | returnK(k):
+      exit_func(k, st, v)
+
+fun exit_func(k, st, v): 
+  match k
+  | functionBoundaryK(fk): continue(fk, st, v)
+  | doneK(): errorV("return not in function")
+  | ~else: exit_func(get_next_k(k), st, v)
+
+fun get_next_k(k :: Cont) :: Cont:
+  match k
+  | doneK(): error(#'next_k, "next_k called on doneK")
+  | plusSecondK(_, __, next_k): next_k
+  | doPlusK(_, next_k): next_k
+  | multSecondK(_, __, next_k): next_k
+  | doMultK(_, next_k): next_k
+  | appArgK(_, __, next_k): next_k
+  | doAppK(_, next_k): next_k
+  | boxK(next_k): next_k
+  | unboxK(next_k): next_k
+  | setboxArgK(_, __, next_k): next_k
+  | setboxK(_, next_k): next_k
+  | beginSecondK(_, __, next_k): next_k
+  | notK(next_k): next_k
+  | ifK(_, __, ___, next_k): next_k
+  | eqLeftK(_, __, next_k): next_k
+  | eqRightK(_, next_k): next_k
+  | whileBodyK(_, __, ___, next_k): next_k
+  | whileCondK(_, __, ___, next_k): next_k
+  | functionBoundaryK(next_k): next_k
+  | returnK(next_k): next_k
+// TODO: Add something here for return
+
+module test:
+  check: interp(parse('2'), mt_env, [], doneK())
+         ~is intV(2)
+  check: interp(parse('x'), mt_env, [], doneK())
+         ~is errorV("free variable: x")
+  check: interp(parse('x'),
+                [values(#'x, 0)],
+                [values(0, intV(9))], doneK())
+         ~is intV(9)
+  check: interp(parse('2 + 1'), mt_env, [], doneK())
+         ~is intV(3)
+  check: interp(parse('2 * 1'), mt_env, [], doneK())
+         ~is intV(2)
+  check: interp(parse('(2 * 3) + (5 + 8)'), mt_env, [], doneK())
+         ~is intV(19)
+  check: interp(parse('fun (x): x + x'),
+                mt_env, [], 
+                doneK())
+         ~is closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env)
+  check: interp(parse('let x = 5: x + x'),
+                mt_env, [], 
+                doneK())
+         ~is intV(10)
+  check: interp(parse('let x = 5:
+                         let x = x + 1:
+                           x + x'),
+                mt_env, [], 
+                doneK())
+         ~is intV(12)
+  check: interp(parse('let x = 5:
+                         let y = 6:
+                           x'),
+                mt_env, [], 
+                doneK())
+         ~is intV(5)
+  check: interp(parse('(fun (x): x + x)(8)'),
+                mt_env, [], 
+                doneK())
+         ~is intV(16)
+  check: interp(parse('1(2)'), mt_env, [], doneK())
+         ~is errorV("not a function")
+  check: interp(parse('1 + (fun (x): x)'), mt_env, [], doneK())
+         ~is errorV("not a number")
+  check: interp(parse('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)'),
+                mt_env, [], 
+                doneK())
+         ~is errorV("free variable: y")
+
+  check: interp(parse('box(2)'), mt_env, [], doneK())
+         ~is boxV(0)
+  check: interp(parse('unbox(box(2))'), mt_env, [], doneK())
+         ~is intV(2)
+  check: interp(parse('set_box(box(2), 3)'), mt_env, [], doneK())
+         ~is intV(3)
+  check: interp(parse('let x = box(2):
+                        set_box(x, 3)
+                        unbox(x)'), mt_env, [], doneK())
+         ~is intV(3)
+  
+  check: interp(parse('while false:
+                         1'), mt_env, [], doneK())
+         ~is voidV()
+  check: interp(parse('let x = box(2):
+                        while false:
+                          set_box(x, 3)
+                        unbox(x)'), mt_env, [], doneK())
+         ~is intV(2)
+  
+  // Failing tests
+  check: interp(parse('let f = (fun (y): return 1; set_box(y, 3)):
+                        let b = box(1):
+                          f(b) + unbox(b)'), mt_env, [], doneK())
+         ~is intV(2)
+  check: interp(parse('let b = box(1):
+                         while true:
+                           break
+                           set_box(b, 2)
+                         unbox(b)'), mt_env, [], doneK())
+         ~is intV(1)
+  check: interp(parse('let b = box(-10):
+                        while (unbox(b) != 0):
+                          set_box(b, unbox(b) + 1)
+                          continue
+                          set_box(b, 2)
+                        unbox(b)'), mt_env, [], doneK())
+         ~is intV(0)
+  check: interp(parse('break'), mt_env, [], doneK())
+         ~is errorV("break not in loop")
+  check: interp(parse('continue'), mt_env, [], doneK())
+         ~is errorV("continue not in loop")
+  check: interp(parse('return 1'), mt_env, [], doneK())
+         ~is errorV("return not in function")
+  
+
+  // Eager:
+  check: interp(parse('(fun (x): 0)(1(2))'), mt_env, [], doneK())
+         ~is errorV("not a function")
+
+  check: continue(doneK(), [], intV(5))
+         ~is intV(5)
+  check: continue(plusSecondK(intE(6), mt_env, doneK()), [], intV(5))
+         ~is intV(11)
+  check: continue(doPlusK(intV(7), doneK()), [], intV(5))
+         ~is intV(12)
+  check: continue(multSecondK(intE(6), mt_env, doneK()), [], intV(5))
+         ~is intV(30)
+  check: continue(doMultK(intV(7), doneK()), [], intV(5))
+         ~is intV(35)
+  check: continue(appArgK(intE(5), mt_env, doneK()), [], closV(#'x, idE(#'x), mt_env))
+         ~is intV(5)
+  check: continue(doAppK(closV(#'x, idE(#'x), mt_env), doneK()), [], intV(8))
+         ~is intV(8)
+                       
+// num_plus and num_mult ----------------------------------------
+fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value, st :: Store, k :: Cont) :: Value:
+  cond
+  | l is_a intV && r is_a intV: continue(k, st, intV(op(intV.n(l), intV.n(r))))
+  | ~else:  errorV("not a number")
+fun num_plus(l :: Value, r :: Value, st :: Store, k :: Cont) :: Value:
+  num_op(fun (a, b): a+b, l, r, st, k)
+fun num_mult(l :: Value, r :: Value, st :: Store, k :: Cont) :: Value:
+  num_op(fun (a, b): a*b, l, r, st, k)
+
+module test:
+  check: num_plus(intV(1), intV(2), [], doneK())
+         ~is intV(3)
+  check: num_mult(intV(3), intV(2), [], doneK())
+         ~is intV(6)
+  
