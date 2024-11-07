@@ -83,7 +83,7 @@ fun update(store: list<(location, evalue)>, l: location, vnew: evalue): maybe<li
           Just(rest') -> Just(Cons((loc, v), rest'))
           Nothing -> Nothing
 
-fun interp(e: exp, env: env): <exn,div> evalue // TODO: change the effect to <div,store,error>
+fun interp(e: exp, env: env): <error,exn,div,store> evalue // TODO: change the effect to <div,store,error>
   match e
     ENum(n) -> VNum(n)
     EVar(ident) -> 
@@ -103,32 +103,49 @@ fun interp(e: exp, env: env): <exn,div> evalue // TODO: change the effect to <di
       match interp(func, env)
         VClosure(id, body, fenv) -> interp(body, Cons((id, interp(arg, env)), fenv))
         _ -> throw("Application of non-function")
+    EBegin(first, next) ->
+      interp(first, env)
+      interp(next, env)
     EBox(startval) -> throw("TODO: Implement this")
     ESetBox(box, newval) -> throw("TODO: Implement this")
-    EGetBox(box) -> throw("TODO: Implement this")
-    EThrow(s: string) -> throw("TODO: Implement this")
+    EGetBox(box) -> 
+      match interp(box, env)
+        VBox(loc) -> 
+          match store-get(loc)
+            Just(v) ->  v
+            Nothing -> ethrow("location not found")
+        _ -> ethrow("not a box") 
+    EThrow(s: string) -> ethrow(s)
     ECatch(s: string, handl: exp, body: exp) ->
       // This one is a bit tricky, so let me give you a bit of help
-      // with override // override the error effect
-      //   ctl ethrow(s)
-      //     throw("TODO: Implement this")
-      throw("TODO: Implement this (and uncomment the above)")
-
+      with override // override the error effect
+        ctl ethrow(errors)
+          if errors == s then
+            interp(handl, env)
+          else
+            ethrow(errors)
+      interp(body, env)
 
 fun real-interp(e: exp): <exn,div> err<evalue> // TODO: after changing the interpreter effect - when changing throw to use ethrow, also change `exn,div` here to `div`
   var store : list<(location, evalue)> := []
   with handler
     fun store-get(l: location)
-      throw("TODO: Implement this")
+      store.get(l)
     fun store-add(v: evalue)
-      throw("TODO: Implement this")
+      val newloc = store.length
+      store := Cons((newloc,v), store)
+      newloc
     fun store-update(l: location, v: evalue)
-      throw("TODO: Implement this")
+      match store.update(l, v)
+        Just(st') -> 
+          store := st'
+          Just(())
+        Nothing -> Nothing
   with handler
     final ctl ethrow(s: string)
-      throw("TODO: Implement this")
+      Err(s)
     return(x)
-      throw("TODO: Implement this")
+      Good(x)
   interp(e, [])
 
 // Desugars let to application.
