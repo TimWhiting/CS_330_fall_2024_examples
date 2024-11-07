@@ -154,7 +154,7 @@ fun let(x: identifier, value: exp, body: exp): e exp
   EApp(ELam(x, body), value)
 
 fun test()
-  check(VNum(2))
+  check(VNum(3))
     real-interp(EAdd(ENum(1), ENum(2)))
   check-exn("Free variable")
     real-interp(EVar("x"))
