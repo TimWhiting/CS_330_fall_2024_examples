@@ -52,7 +52,7 @@ pub fun parse( input0 : sslice, p : () -> <parse|e> a ) : e parse-error<a>
     fun current-input()
       input
 
-    final ctl fail(msg)
+    brk fail(msg)
       ParseError(msg,input)
 
     fun satisfy(pred)
@@ -215,52 +215,4 @@ pub fun hex-digits() : parse string
 pub fun test(s : string, x : a, p : () -> parse a ) : a
   parse-eof(s.slice,p).maybe.default(x)
 */
-type exp
-  Add(e1: exp, e2: exp)
-  Mul(e1: exp, e2: exp)
-  Num(n: int)
 
-fun show(e: exp): string
-  match e
-    Add(e1, e2) -> show(e1) ++ "+" ++ show(e2)
-    Mul(e1, e2) -> show(e1) ++ "*" ++ show(e2)
-    Num(n) -> n.show
-
-fun exp()
-  choose([
-    fn(){
-      val e1 = factor()
-      val _ = char('+')
-      val e2 = exp()
-      Add(e1, e2)
-    },
-    factor,
-  ])
-
-fun factor()
-  choose([
-    fn(){
-      val e1 = term()
-      char('*')
-      val e2 = factor()
-      Mul(e1, e2)
-    },
-    term
-  ])
-
-fun term()
-  choose([
-    fn() {
-      char('(')
-      val e = exp()
-      char(')')
-      e
-    },
-    fn()
-      Num(pint())
-  ])
-
-fun main()
-  match parse-eof("1+2*3".slice, exp)
-    ParseOk(e,_) -> e.show.println
-    ParseError(msg,_) -> msg.println
