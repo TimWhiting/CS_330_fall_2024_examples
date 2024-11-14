@@ -1,0 +1,84 @@
+#lang shplait
+~untyped
+
+def backtrack_depth_box = box(0)
+def fail_box = box(fun(): error(#'backtrack, "not in dynamic extent of backtracking handler"))
+
+macro 'search: $e; ...':
+  'block:
+    def old_fail = unbox(fail_box);
+    set_box(fail_box, fun(): error(#'backtrack, "no more choices"))
+    set_box(backtrack_depth_box, unbox(backtrack_depth_box) + 1)
+    def x:
+          $e
+          ...
+    set_box(backtrack_depth_box, unbox(backtrack_depth_box) - 1)
+    set_box(fail_box, old_fail)
+    x'
+
+macro 'collect: $e; ...':
+  'block:
+    def results = box([])
+    def old_fail = unbox(fail_box)
+    let_cc ret:
+      set_box(fail_box, fun(): ret(#void))
+      set_box(backtrack_depth_box, unbox(backtrack_depth_box) + 1)
+      def x:
+        $e
+        ...
+      set_box(results, cons(x, unbox(results)))
+      unbox(fail_box)()
+    set_box(backtrack_depth_box, unbox(backtrack_depth_box) - 1)
+    set_box(fail_box, old_fail)
+    reverse(unbox(results))'
+
+fun choose_helper(return, old_fail, xs):
+  match xs
+  | []: old_fail()
+  | cons(x, rst): 
+      block:
+        let_cc continue:
+          set_box(fail_box, fun(): continue(#void))
+          return(x)
+        choose_helper(return, old_fail, rst)
+
+fun choose(xs):
+  if 0 == unbox(backtrack_depth_box)
+  | error(#'backtrack, "not in dynamic extent of backtracking handler")
+  | let_cc return:
+      choose_helper(return, unbox(fail_box), xs)
+
+fun guard(b):
+  if 0 == unbox(backtrack_depth_box)
+  | error(#'backtrack, "not in dynamic extent of backtracking handler")
+  | if b
+    | #void
+    | unbox(fail_box)()
+
+check:  search:
+          choose([1,2])
+        ~is 1
+
+check:  search:
+          def x = choose([1,2])
+          guard(x != 1)
+          x
+        ~is 2
+
+check:  collect:
+          def x = choose([1,2,3])
+          guard(x > 1)
+          x
+        ~is [2,3]
+
+check:
+  block:
+    fun f():
+      choose([1,2,3])
+
+    fun g(x):
+      guard(x > 2)
+      x
+
+    search: g(f())
+  ~is 3
