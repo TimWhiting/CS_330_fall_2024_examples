@@ -6,7 +6,6 @@
 // Takes in a list of characters, a success continuation (result, chars, cont), and failure continuation
 type Parser(?a, ?b) = (Listof(Char), (?a, Listof(Char), (() -> ?b)) -> ?b, (() -> ?b)) -> ?b
 
-// parse driver function
 fun string_to_list(s :: String) :: Listof(Char):
   if string_length(s) == 0
   | []
@@ -15,6 +14,7 @@ fun string_to_list(s :: String) :: Listof(Char):
 fun list_to_string(cs :: Listof(Char)) :: String:
   foldl(fun(c, s): s +& c, "", cs)
 
+// parse driver function
 fun parse(p :: Parser(?a,?a), s::String) :: ?a:
   p(string_to_list(s),
     fun(x, cs, fk):
