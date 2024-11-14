@@ -53,6 +53,47 @@ fun bind1(f:: ?a₀ -> Parser(?c, ?b), p₀::Parser(?a₀, ?b)) :: Parser(?c, ?b
 check: parse(bind1(fun(x): unitp(x + 1), unitp(42)), "")
        ~is 43
 
+
+macro 
+| 'do: 
+     return $m1 ...':
+     'unitp($m1 ...)'
+| 'do: 
+    $m1': '$m1'
+| 'do:
+    $x <- return $m1
+    $m2
+    ...':
+    'bind1((fun($x): 
+             do:
+               $m2 
+               ...)
+           ,unitp($m1))'
+| 'do:
+    $x <- $m1
+    $m2
+    ...':
+    'bind1((fun($x): 
+             do:
+               $m2 
+               ...), $m1)'
+| 'do: 
+    return $m1 ...
+    $m2
+    ...':
+    'do:
+      unitp($m1 ...)
+      $m2
+      ...'
+| 'do: 
+    $m1
+    $m2
+    ...':
+    'bind1((fun(_): 
+             do:
+              $m2
+              ...), $m1)'
+
 fun bind2(f:: (?a₀, ?a₁) -> Parser(?c, ?b), p₀::Parser(?a₀, ?b), p₁::Parser(?a₁, ?b)) :: Parser(?c, ?b):
   bind1(fun(x₀): bind1(fun(x₁): f(x₀, x₁), p₁), p₀)
 
