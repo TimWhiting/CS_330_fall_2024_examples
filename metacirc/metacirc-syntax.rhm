@@ -1,0 +1,58 @@
+#lang shplait
+~untyped 
+
+macro 'test_returns $fn:
+         ($arg, ...): $ret
+         ...':
+            'block:
+               check: $fn($arg, ...)
+                      ~is $ret
+               ...'
+
+macro 'test_errors $fn:
+         ($args, ...): $value
+         ...':
+      'begin:
+        check: $fn($args, ...)
+               ~raises $value
+        ...'
+
+def mt_env = fun(n): error(#'interp, "free variable " +& n)
+
+// interp ----------------------------------------
+fun interp(s :: Syntax, env):
+  cond
+  | syntax_is_integer(s): syntax_to_integer(s)
+  | syntax_is_symbol(s): env(s)
+  | ~else:
+      match s
+      | 'let $name = $rhs:
+           $body': interp('(fun($name): $body)($rhs)', env)
+      | '$left + $right':  interp(left, env) + interp(right, env)
+      | '$left * $right':  interp(left, env) * interp(right, env)
+      | 'fun ($id): $body':  fun(arg): interp(body, fun(n1): if n1 == id | arg | env(n1))
+      | '$fn($arg)':
+          interp(fn, env)(interp(arg, env))
+      | '($e)': interp(e, env)
+      | ~else: error(#'interp, "invalid input: " +& s)
+
+module test:
+  test_returns interp:
+    ('2', mt_env): 2
+    ('x', fun(x): 9): 9
+    ('2 + 1', mt_env): 3
+    ('2 * 1', mt_env): 2
+    ('(2 * 3) + (5 + 8)', mt_env): 19
+    ('let x = 5: x + x', mt_env): 10
+    ('let x = 5: let x = x + 1: x + x', mt_env): 12
+    ('let x = 5: let y = 6: x', mt_env): 5
+    ('(fun (x): x + x)(8)', mt_env): 16
+
+  test_errors interp:
+    ('x', mt_env): "free variable"
+    ('1(2)', mt_env): "not a function"
+    ('1 + (fun (x): x)', mt_env): "Number"
+    ('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)',
+     mt_env): "free variable"

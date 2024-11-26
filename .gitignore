@@ -1,3 +1,4 @@
 *.rhm~
 !.vscode/extensions.json
 .koka
+rust/target

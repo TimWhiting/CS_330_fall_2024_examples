@@ -1,0 +1,149 @@
+#lang shplait
+
+macro 'test_returns $fn:
+         ($arg, ...): $ret
+         ...':
+            'block:
+               check: $fn($arg, ...)
+                      ~is $ret
+               ...'
+
+macro 'test_errors $fn:
+         ($args, ...): $value
+         ...':
+      'begin:
+        check: $fn($args, ...)
+               ~raises $value
+        ...'
+
+type Value
+| intV(n :: Int)
+| closV(fn :: (Value) -> Value)
+
+type Exp
+| intE(n :: Int)
+| idE(s :: Symbol)
+| plusE(l :: Exp,
+        r :: Exp)
+| multE(l :: Exp,
+        r :: Exp)
+| letE(n :: Symbol,
+       rhs :: Exp,
+       body :: Exp)
+| funE(n :: Symbol,
+       body :: Exp)
+| appE(fn :: Exp,
+       arg :: Exp)
+
+type Env = (Symbol) -> Value
+
+def mt_env = fun(n): error(#'interp, "free variable " +& n)
+
+// parse ----------------------------------------
+fun parse(s :: Syntax) :: Exp:
+  cond
+  | syntax_is_integer(s):
+      intE(syntax_to_integer(s))
+  | syntax_is_symbol(s):
+      idE(syntax_to_symbol(s))
+  | ~else:
+      match s
+      | 'let $name = $rhs:
+           $body':
+          letE(syntax_to_symbol(name),
+               parse(rhs),
+               parse(body))
+      | '$left + $right':
+          plusE(parse(left),
+                parse(right))
+      | '$left * $right':
+          multE(parse(left),
+                parse(right))
+      | 'fun ($id): $body':
+          funE(syntax_to_symbol(id),
+               parse(body))
+      | '$fn($arg)':
+          appE(parse(fn),
+               parse(arg))
+      | '($e)':
+          parse(e)
+      | ~else:
+          error(#'parse, "invalid input: " +& s)
+
+module test:
+  test_returns parse:
+    ('2'): intE(2)
+    ('x'): idE(#'x)
+    ('2 + 1'): plusE(intE(2), intE(1))
+    ('3 * 4'): multE(intE(3), intE(4))
+    ('3 * 4 + 8'): plusE(multE(intE(3), intE(4)), intE(8))
+    ('fun (x): 9'): funE(#'x, intE(9))
+    ('double(9)'): appE(idE(#'double), intE(9))
+    ('1 + double(9)'): plusE(intE(1), appE(idE(#'double), intE(9)))
+    ('3 * (4 + 8)'): multE(intE(3), plusE(intE(4), intE(8)))
+    ('let x = 1 + 2: y'): letE(#'x, plusE(intE(1), intE(2)), idE(#'y))
+  check: parse('1 2')
+         ~raises "invalid input"
+      
+// interp ----------------------------------------
+fun interp(a :: Exp, env :: Env) :: Value:
+  match a
+  | intE(n): intV(n)
+  | idE(s): env(s)
+  | plusE(l, r): num_plus(interp(l, env), interp(r, env))
+  | multE(l, r): num_mult(interp(l, env), interp(r, env))
+  | letE(n, rhs, body):
+      def rhs_v = interp(rhs, env)
+      interp(body, 
+             fun(n1): 
+               if n1 == n
+               | rhs_v
+               | env(n1))
+  | funE(n, body): 
+      closV(fun(arg): interp(body, fun(n1): if n1 == n | arg | env(n1)))
+  | appE(fn, arg):
+      match interp(fn, env)
+      | closV(f): f(interp(arg, env))
+      | ~else: error(#'interp, "not a function")
+
+module test:
+  test_returns interp:
+    (parse('2'), mt_env): intV(2)
+    (parse('x'), fun(x): intV(9)): intV(9)
+    (parse('2 + 1'), mt_env): intV(3)
+    (parse('2 * 1'), mt_env): intV(2)
+    (parse('(2 * 3) + (5 + 8)'), mt_env): intV(19)
+    (parse('let x = 5: x + x'), mt_env): intV(10)
+    (parse('let x = 5: let x = x + 1: x + x'), mt_env): intV(12)
+    (parse('let x = 5: let y = 6: x'), mt_env): intV(5)
+    (parse('(fun (x): x + x)(8)'), mt_env): intV(16)
+
+//  (parse('fun (x): x + x'), mt_env): closV(#'x, plusE(idE(#'x), idE(#'x)), mt_env)
+  
+  test_errors interp:
+    (parse('x'), mt_env): "free variable"
+    (parse('1(2)'), mt_env): "not a function"
+    (parse('1 + (fun (x): x)'), mt_env): "not a number"
+    (parse('let bad = (fun (x): x + y):
+                         let y = 5:
+                           bad(2)'),
+     mt_env): "free variable"
+
+               
+// num_plus and num_mult ----------------------------------------
+fun num_op(op :: (Int, Int) -> Int, l :: Value, r :: Value) :: Value:
+  cond
+  | l is_a intV && r is_a intV:
+      intV(op(intV.n(l), intV.n(r)))
+  | ~else:
+      error(#'interp, "not a number")
+fun num_plus(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a+b, l, r)
+fun num_mult(l :: Value, r :: Value) :: Value:
+  num_op(fun (a, b): a*b, l, r)
+
+module test:
+  check: num_plus(intV(1), intV(2))
+         ~is intV(3)
+  check: num_mult(intV(3), intV(2))
+         ~is intV(6)
