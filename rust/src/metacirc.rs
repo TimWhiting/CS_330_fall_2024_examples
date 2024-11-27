@@ -5,73 +5,77 @@ enum Exp {
     Num(i32),
     Add(Box<Exp>, Box<Exp>),
     Mul(Box<Exp>, Box<Exp>),
-    Lam(String, Box<Exp>),
+    Lam(&'static str, Box<Exp>),
     App(Box<Exp>, Box<Exp>),
-    Var(String),
+    Var(&'static str),
 }
 use Exp::*;
 
 
 #[derive(Clone)]
-enum Value {
+enum Value<'a> where 
+{
     VNum(i32),
-    Clo(Rc<dyn Fn(Rc<Value>) -> Result<Rc<Value>, &'static str>>),
+    Clo(Rc<dyn Fn(Value<'a>) -> Result<Value<'a>, &'static str> + 'a>),
+}
+
+impl <'a> Value<'a> {
+  fn new_clos(func: impl Fn(Value<'a>) -> Result<Value<'a>, &'static str> + 'a) -> Self {
+    Clo(Rc::new(func))
+  }
 }
 
 #[derive(Clone)]
-struct Env {
-    func: Rc<dyn Fn(&str) -> Result<Rc<Value>, &'static str>>
+struct Env<'a>
+{
+    func: Rc<dyn Fn(&'a str) -> Result<Value<'a>, &'static str> + 'a>
 }
 
-impl Env {
-  fn new(func: Rc<dyn Fn(&str) -> Result<Rc<Value>, &'static str>>) -> Self {
+impl <'a> Env<'a> {
+  fn new(func: impl Fn(&'a str) -> Result<Value<'a>, &'static str> + 'a) -> Self {
     Self {
-      func
+      func: Rc::new(func)
     }
   }
 }
 
 use Value::*;
 
-fn interp(e: Exp, env: Env) -> Result<Rc<Value>, &'static str> {
+fn interp<'b>(e: Exp, env: Env<'b>) -> Result<Value<'b>, &'static str>  
+{
     match e {
-        Num(n) => Ok(Rc::new(VNum(n))),
+        Num(n) => Ok(VNum(n.clone())),
         Add(e1, e2) => match (interp(*e1, env.clone())?.borrow(), interp(*e2, env)?.borrow()) {
-            (VNum(n1), VNum(n2)) => Ok(Rc::new(VNum(n1 + n2))),
+            (VNum(n1), VNum(n2)) => Ok(VNum(n1 + n2)),
             _ => Err("Adding non-numbers"),
         },
         Mul(e1, e2) => match (interp(*e1, env.clone())?.borrow(), interp(*e2, env)?.borrow()) {
-            (VNum(n1), VNum(n2)) => Ok(Rc::new(VNum(n1 * n2))),
+            (VNum(n1), VNum(n2)) => Ok(VNum(n1 * n2)),
             _ => Err("Multiplying non-numbers"),
         },
         Lam(x, body) => {
-          let x_copy = x;
-          let closure_env = env.clone();
-          let body_copy = *body.clone();
-          Ok(Rc::new(Clo(Rc::new(move |x_value| {
-            let x_copy2 = x_copy.clone();
-            let closure_env_copy = closure_env.clone();
-            let x_value_copy = x_value.clone();
-            let extended_env: Env = Env::new(
-              Rc::new(move |id: &str| 
-                if x_copy2 == id { 
-                  Ok(x_value_copy.clone()) 
+          Ok(Value::new_clos(move |x_value | {
+            // The closure environment needs to be cloned each time the function is called
+            // since it is used up (moved into the subclosure) at every call
+            let closure_env = env.clone(); 
+            let extended_env = Env::new(
+              move |id| 
+                if x == id {
+                  // Now the value gets returned (moved out) so we need to clone it, in case this environment gets called again
+                  Ok(x_value.clone()) 
                 } else { 
-                  (closure_env_copy.func)(id)
-                }));
-            interp(body_copy.clone(), extended_env)
-        }))))
+                  (closure_env.func)(id)
+                });
+            // We need to copy the body every time we call the function
+            interp(*body.clone(), extended_env)
+        }))
       },
         App(e1, e2) => match interp(*e1, env.clone())?.borrow() {
             Clo(f) => f(interp(*e2, env)?),
             _ => Err("Applying non-closure"),
         },
-        Var(v) => (env.func)(v.as_str()),
+        Var(v) => (env.func)(v),
     }
-}
-
-fn empty_env(v: &str) -> Result<Rc<Value>, &'static str> {
-    Err("Free variable")
 }
 
 fn add(e1: Exp, e2: Exp) -> Exp {
@@ -82,7 +86,7 @@ fn mul(e1: Exp, e2: Exp) -> Exp {
     Exp::Mul(Box::new(e1), Box::new(e2))
 }
 
-fn lam(x: String, e: Exp) -> Exp {
+fn lam(x: &'static str, e: Exp) -> Exp {
     Exp::Lam(x, Box::new(e))
 }
 
@@ -90,7 +94,7 @@ fn app(e1: Exp, e2: Exp) -> Exp {
     Exp::App(Box::new(e1), Box::new(e2))
 }
 
-fn var(x: String) -> Exp {
+fn var(x: &'static str) -> Exp {
     Exp::Var(x)
 }
 
@@ -102,7 +106,7 @@ fn main() {
     println!("{:?}", add(num(1), num(2)));
 }
 
-impl  Value {
+impl  <'a> Value<'a> {
     fn is_closure(&self) -> bool {
         match self {
             Clo(_) => true,
@@ -111,7 +115,7 @@ impl  Value {
     }
 }
 
-impl  PartialEq for Value {
+impl <'a> PartialEq for Value<'a> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (VNum(n1), VNum(n2)) => n1 == n2,
@@ -121,7 +125,7 @@ impl  PartialEq for Value {
     }
 }
 
-impl  std::fmt::Debug for Value {
+impl <'a> std::fmt::Debug for Value<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             VNum(n) => write!(f, "VNum({})", n),
@@ -130,50 +134,52 @@ impl  std::fmt::Debug for Value {
     }
 }
 
+fn interp_top<'a>(exp : Exp) -> Result<Value<'a>, &'static str> {
+  interp(exp, Env::new(|_x| Err("Free variable")))
+}
+
 #[test]
 fn test() {
-    let ee: Env = Env::new(Rc::new(empty_env));
-    assert_eq!(*interp(add(num(1), num(2)), ee.clone()).unwrap().to_owned(), VNum(3));
-    assert_eq!(*interp(mul(num(2), num(3)), ee.clone()).unwrap().to_owned(), VNum(6));
+    assert_eq!(interp_top(add(num(1), num(2))).unwrap().to_owned(), VNum(3));
+    assert_eq!(interp_top(mul(num(2), num(3))).unwrap().to_owned(), VNum(6));
     assert_eq!(
-      *interp(add(mul(num(2), num(3)), num(4)), ee.clone()).unwrap().to_owned(),
+      interp_top(add(mul(num(2), num(3)), num(4))).unwrap().to_owned(),
         VNum(10)
     );
     assert_eq!(
-      interp(lam("x".to_string(), var("x".to_string())), ee.clone())
+      interp_top(lam("x", var("x")))
             .unwrap().to_owned()
             .is_closure(),
         true
     );
     assert_eq!(
-      *interp(app(lam("x".to_string(), var("x".to_string())), num(3)), ee.clone()).unwrap().to_owned(),
+      interp_top(app(lam("x", var("x")), num(3))).unwrap().to_owned(),
         VNum(3)
     );
     assert_eq!(
-        *interp(
-            app(
-                lam("x".to_string(), add(var("x".to_string()), num(1))),
-                num(3)
-            ),
-            ee.clone()
+      interp_top(
+          app(
+              lam("x", add(var("x"), num(1))),
+              num(3)
+            )
         )
         .unwrap().to_owned(),
         VNum(4)
     );
     assert_eq!(
-        interp(var("x".to_string()), ee.clone()).unwrap_err(),
+      interp_top(var("x")).unwrap_err(),
         "Free variable"
     );
     assert_eq!(
-        interp(app(num(1), num(2)), ee.clone()).unwrap_err(),
+      interp_top(app(num(1), num(2))).unwrap_err(),
         "Applying non-closure"
     );
     assert_eq!(
-        interp(add(num(1), lam("x".to_string(), var("x".to_string()))), ee.clone()).unwrap_err(),
+      interp_top(add(num(1), lam("x", var("x")))).unwrap_err(),
         "Adding non-numbers"
     );
     assert_eq!(
-        interp(mul(num(1), lam("x".to_string(), var("x".to_string()))), ee).unwrap_err(),
+      interp_top(mul(num(1), lam("x", var("x")))).unwrap_err(),
         "Multiplying non-numbers"
     );
 }
